@@ -5,8 +5,178 @@ const ParkingLot = require('../models/ParkingLot');
 const Service = require('../models/Service');
 const User = require('../models/User');
 const { protect } = require('../middleware/authMiddleware');
+const { sendBookingConfirmation } = require('../services/emailService');
+const { createPaymentIntent, confirmPayment } = require('../services/stripeService');
+const { createOrder, verifyPaymentSignature } = require('../services/razorpayService');
 
 const router = express.Router();
+
+// @desc    Calculate booking price (estimation)
+// @route   POST /api/booking/calculate-price
+// @access  Private
+router.post('/calculate-price', protect, [
+  body('parkingLot').notEmpty().withMessage('Parking lot ID is required'),
+  body('startTime').isISO8601().withMessage('Valid start time required'),
+  body('endTime').isISO8601().withMessage('Valid end time required'),
+  body('services').optional().isArray().withMessage('Services must be an array')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
+    }
+    const { parkingLot: parkingLotId, startTime, endTime, services = [] } = req.body;
+    const lot = await ParkingLot.findById(parkingLotId);
+    if (!lot) return res.status(404).json({ success: false, message: 'Parking lot not found' });
+    const sTime = new Date(startTime); const eTime = new Date(endTime);
+    if (eTime <= sTime) return res.status(400).json({ success: false, message: 'End time must be after start time' });
+    const durationMs = eTime - sTime; const hours = Math.ceil(durationMs / (1000*60*60));
+    const basePrice = hours * (lot.pricing?.hourly || 0);
+    let serviceFees = 0; const serviceBreakdown = [];
+    for (const id of services) {
+      const svc = await Service.findById(id);
+      if (svc && svc.isAvailableAt(parkingLotId)) {
+        const svcPrice = svc.getPriceFor(parkingLotId);
+        serviceFees += svcPrice;
+        serviceBreakdown.push({ serviceId: svc._id, name: svc.name, price: svcPrice });
+      }
+    }
+    const taxes = (basePrice + serviceFees) * 0.18;
+    const totalAmount = basePrice + serviceFees + taxes;
+    return res.status(200).json({ success: true, data: { pricing: { basePrice, serviceFees, taxes, totalAmount }, duration: { hours, minutes: Math.floor((durationMs % (1000*60*60)) / (1000*60)) }, services: serviceBreakdown } });
+  } catch (err) {
+    console.error('Calculate price error:', err);
+    res.status(500).json({ success: false, message: 'Error calculating price' });
+  }
+});
+
+// @desc    Create Stripe payment intent
+// @route   POST /api/booking/create-payment-intent
+// @access  Private
+router.post('/create-payment-intent', protect, [
+  body('amount').isFloat({ min: 1 }).withMessage('Valid amount is required'),
+  body('currency').optional().isIn(['inr', 'usd']).withMessage('Invalid currency')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { amount, currency = 'inr', metadata = {} } = req.body;
+
+    const paymentIntent = await createPaymentIntent({
+      amount,
+      currency,
+      metadata: {
+        userId: req.user._id.toString(),
+        ...metadata
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Payment intent created successfully',
+      data: paymentIntent
+    });
+  } catch (error) {
+    console.error('Create payment intent error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating payment intent'
+    });
+  }
+});
+
+// @desc    Create Razorpay order
+// @route   POST /api/booking/create-razorpay-order
+// @access  Private
+router.post('/create-razorpay-order', protect, [
+  body('amount').isFloat({ min: 1 }).withMessage('Valid amount is required'),
+  body('currency').optional().isIn(['INR', 'USD']).withMessage('Invalid currency')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { amount, currency = 'INR', receipt, notes = {} } = req.body;
+
+    const order = await createOrder({
+      amount,
+      currency,
+      receipt: receipt || `booking_${Date.now()}_${req.user._id}`,
+      notes: {
+        userId: req.user._id.toString(),
+        ...notes
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Razorpay order created successfully',
+      data: order
+    });
+  } catch (error) {
+    console.error('Create Razorpay order error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating Razorpay order'
+    });
+  }
+});
+
+// @desc    Verify Razorpay payment
+// @route   POST /api/booking/verify-razorpay-payment
+// @access  Private
+router.post('/verify-razorpay-payment', protect, [
+  body('orderId').notEmpty().withMessage('Order ID is required'),
+  body('paymentId').notEmpty().withMessage('Payment ID is required'),
+  body('signature').notEmpty().withMessage('Signature is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { orderId, paymentId, signature } = req.body;
+
+    const isValidSignature = verifyPaymentSignature(orderId, paymentId, signature);
+
+    if (isValidSignature) {
+      res.status(200).json({
+        success: true,
+        message: 'Payment verified successfully',
+        data: { verified: true }
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Payment verification failed'
+      });
+    }
+  } catch (error) {
+    console.error('Verify Razorpay payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error verifying payment'
+    });
+  }
+});
 
 // @desc    Create new booking
 // @route   POST /api/booking/new
@@ -155,6 +325,14 @@ router.post('/new', protect, [
       $inc: { totalBookings: 1, totalSpent: totalAmount }
     });
 
+    // Send booking confirmation email (don't await to avoid blocking response)
+    try {
+      await sendBookingConfirmation(req.user.email, populatedBooking);
+    } catch (emailError) {
+      console.error('Booking confirmation email error:', emailError);
+      // Don't fail booking if email fails
+    }
+
     // Emit real-time update
     req.io.to(`lot-${parkingLotId}`).emit('booking-created', {
       lotId: parkingLotId,
@@ -173,6 +351,40 @@ router.post('/new', protect, [
       success: false,
       message: 'Server error creating booking'
     });
+  }
+});
+
+// @desc    Get current user's bookings (simplified for UI)
+// @route   GET /api/booking/my
+// @access  Private
+router.get('/my', protect, async (req, res) => {
+  try {
+    const bookings = await Booking.find({ user: req.user._id })
+      .populate('parkingLot', 'name location pricing')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    const mapped = bookings.map(b => ({
+      id: b._id.toString(),
+      lotId: b.parkingLot?._id?.toString(),
+      lotName: b.parkingLot?.name,
+      address: b.parkingLot?.location?.address?.city || '',
+      slotType: b.vehicle?.type || 'car',
+      slotNumber: b.bookingDetails?.spotNumber || '—',
+      startTime: b.bookingDetails?.startTime,
+      endTime: b.bookingDetails?.endTime,
+      createdAt: b.createdAt,
+      status: b.status,
+      paymentStatus: b.payment?.status || 'pending',
+      totalAmount: b.pricing?.totalAmount || 0,
+      qrCode: b.qrCode?.data || '',
+      services: (b.services || []).map(s => s.name || s.serviceId?.toString())
+    }));
+
+    return res.status(200).json({ success:true, data: mapped });
+  } catch (err) {
+    console.error('Get my bookings error:', err);
+    res.status(500).json({ success:false, message:'Error fetching bookings' });
   }
 });
 

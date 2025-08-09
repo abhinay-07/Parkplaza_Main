@@ -90,4 +90,19 @@ userSchema.methods.generateVerificationToken = function() {
   return resetToken;
 };
 
+// Generate password reset token
+userSchema.methods.generatePasswordResetToken = function() {
+  const crypto = require('crypto');
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  
+  this.resetPasswordToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  
+  this.resetPasswordExpire = Date.now() + 60 * 60 * 1000; // 1 hour
+  
+  return resetToken;
+};
+
 module.exports = mongoose.model('User', userSchema);

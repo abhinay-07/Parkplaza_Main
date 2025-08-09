@@ -4,6 +4,9 @@ import { io } from 'socket.io-client';
 let socket = null;
 let isSocketActive = false;
 
+// Getter so other modules can access current socket instance safely
+export const getSocket = () => socket;
+
 const socketSlice = createSlice({
   name: 'socket',
   initialState: {
@@ -106,6 +109,28 @@ export const initializeSocket = () => (dispatch, getState) => {
         dispatch(addNotification(notification));
       } catch (error) {
         console.warn('Failed to add notification:', error);
+      }
+    });
+
+    // Real-time parking lot availability updates (server should emit 'availability-update')
+    socket.on('availability-update', (payload) => {
+      if (!isSocketActive) return;
+      // payload expected: { lotId, available, occupancyRate, status }
+      try {
+        const { parking } = getState();
+        if (parking?.lots?.length) {
+          // Soft update state shape inline to avoid circular import of parking slice
+          const idx = parking.lots.findIndex(l => l._id === payload.lotId || l.id === payload.lotId);
+          if (idx !== -1) {
+            // Mutate via dispatch of a lightweight action (define locally?)
+            // Simpler: create a custom event so components can respond without coupling
+            window.dispatchEvent(new CustomEvent('parking-availability-update', { detail: payload }));
+          }
+        }
+        // Always broadcast browser event for map hook listeners
+        window.dispatchEvent(new CustomEvent('parking-availability-update', { detail: payload }));
+      } catch (err) {
+        console.warn('Failed handling availability-update:', err);
       }
     });
   }
