@@ -1,59 +1,46 @@
-import API from './api';
+import { parkingAPI } from './api';
 
 const parkingService = {
   // Get all parking lots with filters
   getAllParkingLots: async (filters = {}) => {
-    const params = new URLSearchParams();
-    
-    Object.entries(filters).forEach(([key, value]) => {
-      if (value !== null && value !== undefined && value !== '') {
-        if (Array.isArray(value)) {
-          params.append(key, value.join(','));
-        } else {
-          params.append(key, value.toString());
-        }
-      }
-    });
-
-    const response = await API.get(`/parking/all?${params}`);
-    return response.data;
+  const { data } = await parkingAPI.getAll(filters);
+  return data;
   },
 
   // Get parking lot details
   getParkingLotDetails: async (id) => {
-    const response = await API.get(`/parking/${id}`);
-    return response.data;
+  const { data } = await parkingAPI.getDetails(id);
+  return data;
   },
 
   // Create new parking lot (landowner)
   createParkingLot: async (lotData) => {
-    const response = await API.post('/parking/create', lotData);
-    return response.data;
+  const { data } = await parkingAPI.create(lotData);
+  return data;
   },
 
   // Update parking lot
   updateParkingLot: async (id, data) => {
-    const response = await API.put(`/parking/${id}`, data);
-    return response.data;
+  const { data: resp } = await parkingAPI.update(id, data);
+  return resp;
   },
 
   // Get my parking lots (landowner)
   getMyParkingLots: async (pagination = {}) => {
-    const params = new URLSearchParams(pagination);
-    const response = await API.get(`/parking/owner/my-lots?${params}`);
-    return response.data;
+  const { data } = await parkingAPI.myLots(pagination);
+  return data;
   },
 
   // Update availability
   updateAvailability: async (id, availabilityData) => {
-    const response = await API.put(`/parking/${id}/availability`, availabilityData);
-    return response.data;
+  const { data } = await parkingAPI.updateAvailability(id, availabilityData);
+  return data;
   },
 
   // Search parking lots by location
   searchByLocation: async (lat, lng, radius = 5) => {
-    const response = await API.get(`/parking/all?lat=${lat}&lng=${lng}&radius=${radius}`);
-    return response.data;
+  const { data } = await parkingAPI.getAll({ lat, lng, radius });
+  return data;
   },
 
   // Get nearby parking lots
@@ -61,6 +48,15 @@ const parkingService = {
     const { lat, lng } = coordinates;
     return await parkingService.searchByLocation(lat, lng, radius);
   },
+  // Slots
+  getSlots: async (lotId, all=false) => {
+    const { data } = await parkingAPI.getSlots(lotId, all);
+    return data;
+  },
+  reserveSlot: async (lotId, slotCode) => {
+    const { data } = await parkingAPI.reserveSlot(lotId, slotCode);
+    return data;
+  }
 };
 
 export default parkingService;

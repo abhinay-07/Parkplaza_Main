@@ -20,18 +20,36 @@ const AuthPage = () => {
   const location = useLocation();
   const { loading, error } = useSelector((state) => state.auth);
   
-  const from = location.state?.from?.pathname || '/';
+  // Determine where to redirect after auth. Support either a simple pathname string or a full location object.
+  const fromState = location.state?.from;
+  // Support either state.from (string or location), ?from= query string, or sessionStorage fallback
+  const searchParams = new URLSearchParams(location.search);
+  const fromQuery = searchParams.get('from');
+  const fromSession = (() => {
+    try { return sessionStorage.getItem('postLoginRedirect'); } catch { return null; }
+  })();
+  const from = (() => {
+    if (typeof fromState === 'string') return fromState;
+    if (fromState && typeof fromState === 'object' && fromState.pathname) {
+      const search = fromState.search || '';
+      const hash = fromState.hash || '';
+      return `${fromState.pathname}${search}${hash}`;
+    }
+    return fromQuery || fromSession || '/';
+  })();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
     try {
-      if (isLogin) {
+  if (isLogin) {
         await dispatch(login({ email: formData.email, password: formData.password })).unwrap();
       } else {
         await dispatch(register(formData)).unwrap();
       }
-      navigate(from, { replace: true });
+  // Clear any saved redirect once used
+  try { sessionStorage.removeItem('postLoginRedirect'); } catch {}
+  navigate(from, { replace: true });
     } catch (error) {
       console.error('Auth error:', error);
     }

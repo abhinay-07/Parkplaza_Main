@@ -16,6 +16,11 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
   }
 
   if (!isAuthenticated) {
+    // Persist intended location for post-login redirect
+    try {
+      const intended = `${location.pathname}${location.search || ''}`;
+      sessionStorage.setItem('postLoginRedirect', intended);
+    } catch {}
     // Redirect to auth page with return url
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }

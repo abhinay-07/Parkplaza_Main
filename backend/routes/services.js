@@ -118,9 +118,37 @@ router.get('/options', [
   }
 });
 
-// @desc    Get service details
+// NOTE: The generic '/:id' route is intentionally placed AFTER more specific
+// routes like '/category/*', '/featured/popular', '/search/query' so that they
+// are not shadowed. Express matches in declaration order.
+// @desc    Get service details (placed after specific prefixed routes)
 // @route   GET /api/services/:id
 // @access  Public
+router.get('/:id', async (req, res) => {
+  try {
+    const service = await Service.findById(req.params.id)
+      .populate('availableAt.parkingLot', 'name location');
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: 'Service not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { service }
+    });
+
+  } catch (error) {
+    console.error('Get service error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching service'
+    });
+  }
+});
 router.get('/:id', async (req, res) => {
   try {
     const service = await Service.findById(req.params.id)

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 
@@ -7,17 +7,21 @@ import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import LoadingSpinner from './components/ui/LoadingSpinner';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 
-// Pages
-import HomePage from './pages/HomePage';
-import AuthPage from './pages/AuthPage';
-import BookingPage from './pages/BookingPage';
-import ProfilePage from './pages/ProfilePage';
-import LandlordDashboard from './pages/LandlordDashboard';
-import AdminDashboard from './pages/AdminDashboard';
-import ParkingLotDetails from './pages/ParkingLotDetails';
-import MyBookings from './pages/MyBookings';
-import ServicesPage from './pages/ServicesPage';
+// Lazy-loaded Pages
+const HomePage = lazy(() => import('./pages/HomePageNew'));
+const AuthPage = lazy(() => import('./pages/AuthPage'));
+const BookingPage = lazy(() => import('./pages/BookingPage'));
+const PaymentPage = lazy(() => import('./pages/PaymentPage'));
+const BookingSuccessPage = lazy(() => import('./pages/BookingSuccessPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const LandlordDashboard = lazy(() => import('./pages/LandlordDashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const ParkingLotDetails = lazy(() => import('./pages/ParkingLotDetails'));
+const MyBookings = lazy(() => import('./pages/MyBookings'));
+const ServicesPage = lazy(() => import('./pages/ServicesPage'));
+const ParkingMapDemo = lazy(() => import('./components/maps/ParkingMap'));
 
 // Redux actions
 import { loadUser } from './store/slices/authSlice';
@@ -62,90 +66,89 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navbar />
-      
-      <main className="flex-1">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<HomePage />} />
-          <Route 
-            path="/auth" 
-            element={
-              isAuthenticated ? <Navigate to="/dashboard" replace /> : <AuthPage />
-            } 
-          />
-          <Route path="/parking/:id" element={<ParkingLotDetails />} />
-          <Route path="/services" element={<ServicesPage />} />
-          
-          {/* Protected Routes */}
-          <Route 
-            path="/dashboard" 
-            element={
-              <ProtectedRoute>
-                {user?.role === 'admin' ? (
-                  <AdminDashboard />
-                ) : user?.role === 'landowner' ? (
-                  <LandlordDashboard />
-                ) : (
-                  <Navigate to="/profile" replace />
-                )}
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/profile" 
-            element={
-              <ProtectedRoute>
-                <ProfilePage />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/booking/:id" 
-            element={
-              <ProtectedRoute>
-                <BookingPage />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/my-bookings" 
-            element={
-              <ProtectedRoute>
-                <MyBookings />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/landlord/*" 
-            element={
-              <ProtectedRoute requiredRole="landowner">
-                <LandlordDashboard />
-              </ProtectedRoute>
-            } 
-          />
-          
-          <Route 
-            path="/admin/*" 
-            element={
-              <ProtectedRoute requiredRole="admin">
-                <AdminDashboard />
-              </ProtectedRoute>
-            } 
-          />
-          
-          {/* Catch all route */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-      
-      <Footer />
-    </div>
+    <ErrorBoundary>
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        
+        <main className="flex-1">
+          <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><LoadingSpinner size="lg" /></div>}>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/" element={<HomePage />} />
+              <Route path="/auth" element={<AuthPage />} />
+              <Route path="/parking-lot/:lotId" element={<ParkingLotDetails />} />
+              <Route path="/services" element={<ServicesPage />} />
+              {/* Demo: standalone ParkingMap using Places API */}
+              <Route path="/demo/parking-map" element={<ParkingMapDemo />} />
+              
+              {/* Booking Flow Routes */}
+              <Route path="/booking" element={<BookingPage />} />
+              <Route path="/payment" element={<PaymentPage />} />
+              <Route path="/booking-success" element={<BookingSuccessPage />} />
+              
+              {/* Protected Routes */}
+              <Route 
+                path="/dashboard" 
+                element={
+                  <ProtectedRoute>
+                    {(() => {
+                      if (user?.role === 'admin') {
+                        return <AdminDashboard />;
+                      } else if (user?.role === 'landowner') {
+                        return <LandlordDashboard />;
+                      } else {
+                        return <Navigate to="/profile" replace />;
+                      }
+                    })()}
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/profile" 
+                element={
+                  <ProtectedRoute>
+                    <ProfilePage />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/my-bookings" 
+                element={
+                  <ProtectedRoute>
+                    <MyBookings />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/landlord/*" 
+                element={
+                  <ProtectedRoute requiredRole="landowner">
+                    <LandlordDashboard />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              <Route 
+                path="/admin/*" 
+                element={
+                  <ProtectedRoute requiredRole="admin">
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                } 
+              />
+              
+              {/* Catch all route */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </main>
+        
+        <Footer />
+      </div>
+    </ErrorBoundary>
   );
 }
 

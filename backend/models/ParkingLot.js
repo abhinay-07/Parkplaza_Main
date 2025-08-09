@@ -139,6 +139,18 @@ const parkingLotSchema = new mongoose.Schema({
   verificationDocuments: [{
     type: String,
     url: String
+  }],
+  // Physical slot layout (optional for 3D selection)
+  slots: [{
+    code: { type: String }, // e.g., L1-A-01
+    type: { type: String, enum: ['car','bike','truck','van','bicycle'], default: 'car' },
+    level: { type: Number, default: 1 },
+    status: { type: String, enum: ['available','reserved','occupied','maintenance'], default: 'available' },
+    position: { // For 3D rendering (arbitrary units)
+      x: Number,
+      y: Number, // height (level offset)
+      z: Number
+    }
   }]
 }, {
   timestamps: true
@@ -149,6 +161,7 @@ parkingLotSchema.index({ 'location.coordinates': '2dsphere' });
 parkingLotSchema.index({ status: 1 });
 parkingLotSchema.index({ 'capacity.available': 1 });
 parkingLotSchema.index({ owner: 1 });
+parkingLotSchema.index({ 'slots.status': 1 });
 
 // Update availability when booking is made
 parkingLotSchema.methods.updateAvailability = function(change) {
@@ -172,6 +185,31 @@ parkingLotSchema.methods.isOpenAt = function(day, time) {
   const closeTime = new Date(`1970/01/01 ${daySchedule.close}`);
   
   return currentTime >= openTime && currentTime <= closeTime;
+};
+
+// Generate a simple grid of slots (utility, not auto-run)
+parkingLotSchema.methods.generateSlots = function({ levels = 1, rows = 5, cols = 10, type = 'car' } = {}) {
+  const slots = [];
+  const pad = (n) => String(n).padStart(2,'0');
+  for (let l = 1; l <= levels; l++) {
+    for (let r = 1; r <= rows; r++) {
+      for (let c = 1; c <= cols; c++) {
+        slots.push({
+          code: `L${l}-R${pad(r)}-C${pad(c)}`,
+          type,
+          level: l,
+          status: 'available',
+          position: {
+            x: c * 2,
+            y: (l - 1) * 5,
+            z: r * 4
+          }
+        });
+      }
+    }
+  }
+  this.slots = slots;
+  return this.save();
 };
 
 module.exports = mongoose.model('ParkingLot', parkingLotSchema);

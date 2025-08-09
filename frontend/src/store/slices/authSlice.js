@@ -6,8 +6,8 @@ export const register = createAsyncThunk(
   'auth/register',
   async (userData, { rejectWithValue }) => {
     try {
-      const response = await authService.register(userData);
-      return response.data;
+  const data = await authService.register(userData);
+  return data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Registration failed');
     }
@@ -18,8 +18,8 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
-      const response = await authService.login(credentials);
-      return response.data;
+  const data = await authService.login(credentials);
+  return data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
@@ -30,8 +30,8 @@ export const loadUser = createAsyncThunk(
   'auth/loadUser',
   async (_, { rejectWithValue }) => {
     try {
-      const response = await authService.getProfile();
-      return response.data;
+  const data = await authService.getProfile();
+  return data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Failed to load user');
     }
@@ -42,8 +42,8 @@ export const updateProfile = createAsyncThunk(
   'auth/updateProfile',
   async (profileData, { rejectWithValue }) => {
     try {
-      const response = await authService.updateProfile(profileData);
-      return response.data;
+  const data = await authService.updateProfile(profileData);
+  return data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Update failed');
     }
@@ -54,8 +54,8 @@ export const changePassword = createAsyncThunk(
   'auth/changePassword',
   async (passwordData, { rejectWithValue }) => {
     try {
-      const response = await authService.changePassword(passwordData);
-      return response.data;
+  const data = await authService.changePassword(passwordData);
+  return data;
     } catch (error) {
       return rejectWithValue(error.response?.data?.message || 'Password change failed');
     }
@@ -98,10 +98,10 @@ const authSlice = createSlice({
       })
       .addCase(register.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.token = action.payload.token;
+        state.user = action.payload?.data?.user;
+        state.token = action.payload?.data?.token;
         state.isAuthenticated = true;
-        localStorage.setItem('token', action.payload.token);
+        if (state.token) localStorage.setItem('token', state.token);
       })
       .addCase(register.rejected, (state, action) => {
         state.loading = false;
@@ -116,10 +116,10 @@ const authSlice = createSlice({
       })
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.token = action.payload.token;
+        state.user = action.payload?.data?.user;
+        state.token = action.payload?.data?.token;
         state.isAuthenticated = true;
-        localStorage.setItem('token', action.payload.token);
+        if (state.token) localStorage.setItem('token', state.token);
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
@@ -133,7 +133,7 @@ const authSlice = createSlice({
       })
       .addCase(loadUser.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
+        state.user = action.payload?.data?.user;
         state.isAuthenticated = true;
       })
       .addCase(loadUser.rejected, (state) => {
@@ -154,7 +154,7 @@ const authSlice = createSlice({
       })
       .addCase(updateProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
+        state.user = action.payload?.data?.user;
       })
       .addCase(updateProfile.rejected, (state, action) => {
         state.loading = false;
