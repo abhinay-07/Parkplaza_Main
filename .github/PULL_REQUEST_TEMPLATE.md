@@ -5,17 +5,17 @@ Implements an end-to-end parking experience with map/list views, booking, paymen
 ## Changes
 
 - Frontend
-  - Components: ParkingMap, Slot3DViewer, ParkingLotCardNew, SearchFiltersNew, ErrorBoundary
-  - Pages: HomePageNew, PaymentPage, BookingSuccessPage
-  - Hooks: useAPI, useAuth, useGeolocation
-  - Services: bookingService, servicesService, demoLots, mockData
-  - Removes deprecated: HomePage, ParkingLotCard.js, SearchFilters.js
+	- Components: ParkingMap, Slot3DViewer, ParkingLotCardNew, SearchFiltersNew, ErrorBoundary
+	- Pages: HomePageNew, PaymentPage, BookingSuccessPage
+	- Hooks: useAPI, useAuth, useGeolocation
+	- Services: bookingService, servicesService, demoLots, mockData
+	- Removes deprecated: HomePage, ParkingLotCard.js, SearchFilters.js
 - Backend
-  - Middleware: rateLimiter, performanceMonitor
-  - Services: email/stripe/razorpay stubs, seed script, smoke test
-  - Config: cloudinary/logger, env.production templates
+	- Middleware: rateLimiter, performanceMonitor
+	- Services: email/stripe/razorpay stubs, seed script, smoke test
+	- Config: cloudinary/logger, env.production templates
 - DX
-  - DEPLOYMENT.md, deploy.ps1, favicon, package updates
+	- DEPLOYMENT.md, deploy.ps1, favicon, package updates
 
 ## Breaking changes
 
