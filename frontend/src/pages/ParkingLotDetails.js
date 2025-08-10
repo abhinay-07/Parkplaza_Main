@@ -358,6 +358,9 @@ const ParkingLotDetails = () => {
                     showUserLocation={false}
                     height="100%"
                     zoom={16}
+                    debug={true}
+                    lazy={false}
+                    idleDelay={0}
                   />
                 </div>
               </div>

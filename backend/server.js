@@ -249,6 +249,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Maps status endpoint (diagnostics only; does not expose keys)
+app.get('/api/maps/status', (req, res) => {
+  res.status(200).json({
+    success: true,
+    hasBackendKey: Boolean(process.env.GOOGLE_MAPS_API_KEY),
+    hasFrontendKey: Boolean(process.env.REACT_APP_GOOGLE_MAPS_API_KEY),
+    frontendOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    environment: process.env.NODE_ENV || 'development',
+  });
+});
+
 // Lightweight diagnostics (enabled only if DEBUG_STATUS_TOKEN set)
 app.get('/api/debug/status', (req, res) => {
   const token = process.env.DEBUG_STATUS_TOKEN;

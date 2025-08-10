@@ -66,6 +66,11 @@ const theme = createTheme({
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
+// Enable Google Maps loader debug logs in development
+if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
+  window.GMAPS_DEBUG = true;
+}
+
 root.render(
   <React.StrictMode>
     <Provider store={store}>

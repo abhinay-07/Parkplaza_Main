@@ -304,6 +304,9 @@ const HomePage = () => {
                       onParkingLotSelect={handleLotSelect}
                       selectedLotId={selectedLot?.id}
                       height="100%"
+                      debug={true}
+                      lazy={false}
+                      idleDelay={0}
                     />
                   </div>
                 </div>
