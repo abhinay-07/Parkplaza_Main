@@ -6,7 +6,7 @@ A comprehensive MERN stack application for smart parking management with real-ti
 
 ### For Users
 - **Smart Parking Search** - Find parking spots by location with real-time availability
-- **Interactive Map** - Google Maps/Leaflet integration with live navigation
+- **Interactive Map** - Leaflet (OpenStreetMap) with live navigation
 - **Online Booking** - Reserve parking spots in advance
 - **Real-time Updates** - Live availability and occupancy tracking
 - **Service Add-ons** - Car wash, valet, EV charging, and more
@@ -42,7 +42,7 @@ A comprehensive MERN stack application for smart parking management with real-ti
 - **Redux Toolkit** for state management
 - **Material-UI & Tailwind CSS** for styling
 - **React Router** for navigation
-- **Leaflet/Google Maps** for mapping
+- **Leaflet (OpenStreetMap)** for mapping
 - **Socket.io Client** for real-time features
 
 ## 📦 Installation
