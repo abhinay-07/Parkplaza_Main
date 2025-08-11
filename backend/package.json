@@ -6,12 +6,15 @@
   "scripts": {
     "start": "node server.js",
   "dev": "npx nodemon server.js",
-    "prod": "NODE_ENV=production node server.js",
+  "prod": "set NODE_ENV=production&& node server.js",
     "test": "jest",
     "seed": "node scripts/seedDatabase.js",
+  "seed:real": "node scripts/seedRealUsersAndPlaces.js",
+  "import:places": "node scripts/importPlaces.js",
     "build": "npm install --production"
   },
   "dependencies": {
+  "minimist": "^1.2.8",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
     "cors": "^2.8.5",

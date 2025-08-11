@@ -66,6 +66,15 @@ export const parkingAPI = {
   // Slots
   getSlots: (lotId, all=false) => API.get(`/parking/${lotId}/slots`, { params: { all } }),
   reserveSlot: (lotId, slotCode) => API.post(`/parking/${lotId}/slots/reserve`, { slotCode }),
+  // Admin/Landowner: import places into DB
+  importPlaces: ({ lat, lng, radiusMeters = 2000, limit = 10, ownerEmail }) =>
+    API.post('/parking/import/places', null, { params: { lat, lng, radiusMeters, limit, ownerEmail } }),
+  // Admin/Landowner: import OSM parking into DB (no billing)
+  importOSM: ({ lat, lng, radiusMeters = 2000, limit = 10, ownerEmail }) =>
+    API.post('/parking/import/osm', null, { params: { lat, lng, radiusMeters, limit, ownerEmail } }),
+  // Dev only: seed random parking lots near a location
+  seedRandom: ({ lat, lng, count = 10, radiusMeters = 2000, ownerEmail }) =>
+    API.post('/parking/seed/random', null, { params: { lat, lng, count, radiusMeters, ownerEmail } }),
 };
 
 export const servicesAPI = {

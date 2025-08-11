@@ -8,6 +8,10 @@ const { uploadImage, deleteImage } = require('../config/cloudinary');
 
 const router = express.Router();
 
+// In-memory cache to speed up repeated OSM (Overpass) queries
+const OSM_CACHE = new Map();
+const OSM_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
 // Multer configuration for image uploads
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -21,6 +25,176 @@ const upload = multer({
     } else {
       cb(new Error('Only image files are allowed!'), false);
     }
+  }
+});
+
+// --- Development seeding: create random lots near a location ---
+// Helpers for seeding
+function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function randomChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function randomSubset(arr, minCount = 1, maxCount = arr.length) {
+  const count = randomInt(minCount, Math.min(maxCount, arr.length));
+  const shuffled = [...arr].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+// Displace lat/lng by distance (meters) and bearing (radians)
+function displaceLatLng(lat, lng, distanceMeters, bearingRad) {
+  const R = 6378137; // Earth radius (m)
+  const dByR = distanceMeters / R;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(dByR) + Math.cos(lat1) * Math.sin(dByR) * Math.cos(bearingRad)
+  );
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(dByR) * Math.cos(lat1),
+    Math.cos(dByR) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  return { lat: (lat2 * 180) / Math.PI, lng: ((lng2 * 180) / Math.PI) };
+}
+
+// @desc    Seed N random parking lots near a coordinate with default services (DEV ONLY)
+// @route   POST /api/parking/seed/random
+// @access  Private (Admin/Landowner)
+router.post('/seed/random', protect, authorize('admin', 'landowner'), async (req, res) => {
+  try {
+    const {
+      lat, lng,
+      count = 10,
+      radiusMeters = 2000,
+      ownerEmail
+    } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ success: false, message: 'lat and lng are required' });
+    }
+
+    const User = require('../models/User');
+    const Service = require('../models/Service');
+
+    // Resolve owner
+    let ownerId = req.user._id;
+    if (ownerEmail && req.user.role === 'admin') {
+      const ownerUser = await User.findOne({ email: ownerEmail.toLowerCase() });
+      if (ownerUser) ownerId = ownerUser._id;
+    }
+
+    // Name parts for randomization
+    const prefixes = ['Dev', 'Prime', 'Metro', 'Central', 'City', 'Skyline', 'Urban', 'Easy', 'Smart', 'Nova'];
+    const suffixes = ['Parking', 'Park & Ride', 'Auto Park', 'Plaza Parking', 'Secure Park', 'Hub Parking', 'Garage', 'Lot'];
+    const descriptors = ['North', 'South', 'East', 'West', 'Heights', 'Square', 'Center', 'Garden', 'Point', 'Vista'];
+
+    const amenitiesList = ['covered', 'security', 'cctv', 'lighting', 'washroom', 'ev-charging', 'car-wash', 'valet-service', 'wifi'];
+    const vehicleTypeOptions = ['car', 'bike', 'van'];
+
+    const createdLots = [];
+
+    for (let i = 0; i < parseInt(count); i++) {
+      const distance = Math.random() * parseInt(radiusMeters);
+      const bearing = Math.random() * Math.PI * 2;
+      const { lat: nlat, lng: nlng } = displaceLatLng(parseFloat(lat), parseFloat(lng), distance, bearing);
+
+      const totalCapacity = randomInt(60, 220);
+      const hourly = randomInt(20, 120);
+
+      const name = `${randomChoice(prefixes)} ${randomChoice(descriptors)} ${randomChoice(suffixes)}`;
+
+      const lot = await ParkingLot.create({
+        name,
+        description: 'Development sample parking location with generated data.',
+        owner: ownerId,
+        location: {
+          type: 'Point',
+          coordinates: [nlng, nlat],
+          address: {
+            street: `${randomInt(1, 150)} ${randomChoice(['Main Rd', '2nd Ave', 'Tech Park Rd', 'Market St'])}`,
+            city: 'Dev City',
+            state: 'Dev State',
+            country: 'India'
+          },
+          landmarks: [randomChoice(['Mall', 'Metro', 'Hospital', 'IT Park', 'Stadium'])]
+        },
+        capacity: { total: totalCapacity, available: totalCapacity, reserved: 0 },
+        vehicleTypes: randomSubset(vehicleTypeOptions, 1, vehicleTypeOptions.length),
+        pricing: { hourly, daily: hourly * 6, currency: 'INR' },
+        amenities: randomSubset(amenitiesList, 3, 7),
+        operatingHours: {
+          monday: { open: '06:00', close: '23:00', is24Hours: false },
+          tuesday: { open: '06:00', close: '23:00', is24Hours: false },
+          wednesday: { open: '06:00', close: '23:00', is24Hours: false },
+          thursday: { open: '06:00', close: '23:00', is24Hours: false },
+          friday: { open: '06:00', close: '23:00', is24Hours: false },
+          saturday: { open: '08:00', close: '23:00', is24Hours: false },
+          sunday: { open: '08:00', close: '22:00', is24Hours: false }
+        },
+        images: []
+      });
+
+      // Generate a rough slot grid near capacity
+      try {
+        const levels = randomInt(1, 2);
+        const approxPerLevel = Math.max(10, Math.floor(totalCapacity / levels));
+        const cols = Math.max(8, Math.min(16, Math.floor(Math.sqrt(approxPerLevel)) + randomInt(0, 2)));
+        const rows = Math.max(5, Math.floor(approxPerLevel / cols) + randomInt(0, 2));
+        await lot.generateSlots({ levels, rows, cols, type: 'car' });
+      } catch (e) {
+        // non-fatal for seeding
+      }
+
+      // Create 3-4 default services per lot
+      const serviceDefs = [
+        {
+          name: 'Premium Car Wash', category: 'car-wash', unit: 'per-service', base: randomInt(299, 599),
+          provider: { name: 'ShinePro', phone: '+9111000001' }, details: { includes: ['Exterior', 'Interior'] }
+        },
+        {
+          name: 'EV Fast Charging', category: 'charging', unit: 'per-hour', base: randomInt(20, 40),
+          provider: { name: 'ChargeNet', phone: '+9111000002' }, details: { } 
+        },
+        {
+          name: 'Valet Parking', category: 'valet', unit: 'per-hour', base: randomInt(99, 199),
+          provider: { name: 'Prestige Valet', phone: '+9111000003' }, details: { }
+        },
+        {
+          name: 'Basic Maintenance', category: 'maintenance', unit: 'per-service', base: randomInt(199, 399),
+          provider: { name: 'AutoCare', phone: '+9111000004' }, details: { includes: ['Oil top-up', 'Tire air'] }
+        }
+      ];
+
+      const useServices = randomSubset(serviceDefs, 3, 4);
+      for (const s of useServices) {
+        await Service.create({
+          name: s.name,
+          description: `${s.name} available at this location`,
+          category: s.category,
+          pricing: { basePrice: s.base, currency: 'INR', unit: s.unit },
+          provider: { name: s.provider.name, contact: { phone: s.provider.phone }, rating: { average: randomInt(35, 48) / 10, count: randomInt(10, 200) } },
+          availability: { isActive: true, operatingHours: { start: '07:00', end: '22:00', is24Hours: false }, daysAvailable: ['monday','tuesday','wednesday','thursday','friday','saturday'] },
+          details: { vehicleTypes: ['car'], includes: s.details.includes || [] },
+          availableAt: [{ parkingLot: lot._id, customPricing: undefined, isActive: true }]
+        });
+      }
+
+      createdLots.push(lot);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Seeded ${createdLots.length} development parking lots`,
+      data: {
+        lots: createdLots.map(l => ({
+          id: l._id,
+          name: l.name,
+          lat: l.location.coordinates[1],
+          lng: l.location.coordinates[0],
+          capacity: l.capacity,
+          pricing: l.pricing
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Seed random lots error:', error);
+    res.status(500).json({ success: false, message: 'Server error seeding random lots' });
   }
 });
 
@@ -159,194 +333,185 @@ router.delete('/delete-image/:lotId/:imageId', protect, authorize('landowner', '
   }
 });
 
-// @desc    Get all parking lots with filters and search
-// @route   GET /api/parking/all
-// @access  Public
-router.get('/all', [
-  query('lat').optional().isFloat().withMessage('Invalid latitude'),
-  query('lng').optional().isFloat().withMessage('Invalid longitude'),
-  query('radius').optional().isInt({ min: 1, max: 50 }).withMessage('Radius must be between 1-50 km'),
-  query('vehicleType').optional().isIn(['car', 'bike', 'truck', 'van', 'bicycle']),
-  query('minPrice').optional().isFloat({ min: 0 }),
-  query('maxPrice').optional().isFloat({ min: 0 }),
-  query('amenities').optional(),
-  query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1-50')
+// @desc    Import nearby parking from OpenStreetMap (Overpass API) into ParkingLot collection
+// @route   POST /api/parking/import/osm
+// @access  Private (admin or landowner)
+// Query: lat,lng (required), radiusMeters (optional, default 2000), limit (1-50, default 10), ownerEmail (admin only), mirror (de|kumi|ru), mode (nodes|all)
+router.post('/import/osm', protect, authorize('admin', 'landowner'), [
+  query('lat').isFloat().withMessage('Latitude required'),
+  query('lng').isFloat().withMessage('Longitude required'),
+  query('radiusMeters').optional().isInt({ min: 100, max: 50000 }).withMessage('radiusMeters 100-50000'),
+  query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('limit 1-50'),
+  query('ownerEmail').optional().isString(),
+  query('mirror').optional().isString(),
+  query('mode').optional().isIn(['nodes','all']).withMessage('mode must be nodes or all')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
     }
 
-    const {
-      lat, lng, radius = 10, vehicleType, minPrice, maxPrice,
-      amenities, page = 1, limit = 10, search
-    } = req.query;
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const radiusMeters = parseInt(req.query.radiusMeters || '2000', 10);
+    const limit = parseInt(req.query.limit || '10', 10);
+    const ownerEmail = req.query.ownerEmail ? String(req.query.ownerEmail).toLowerCase() : undefined;
+    const mirror = String(req.query.mirror || 'kumi');
+    const mode = String(req.query.mode || 'nodes');
 
-    // Build aggregation pipeline for geospatial queries
-    let pipeline = [];
-
-    // Start with match stage for basic filters
-    let matchStage = { status: 'active', 'capacity.available': { $gt: 0 } };
-
-    // Vehicle type filter
-    if (vehicleType) {
-      matchStage.vehicleTypes = vehicleType;
-    }
-
-    // Price range filter
-    if (minPrice || maxPrice) {
-      matchStage['pricing.hourly'] = {};
-      if (minPrice) matchStage['pricing.hourly'].$gte = parseFloat(minPrice);
-      if (maxPrice) matchStage['pricing.hourly'].$lte = parseFloat(maxPrice);
-    }
-
-    // Amenities filter
-    if (amenities) {
-      const amenityList = amenities.split(',');
-      matchStage.amenities = { $in: amenityList };
-    }
-
-    // Text search
-    if (search) {
-      matchStage.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { 'location.address.city': { $regex: search, $options: 'i' } },
-        { 'location.address.state': { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Add location-based search using $geoNear if lat/lng provided
-    if (lat && lng) {
-      // Use $geoNear as the first stage for location-based queries
-      pipeline.push({
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)]
-          },
-          distanceField: 'distance',
-          maxDistance: radius * 1000, // Convert km to meters
-          spherical: true,
-          query: matchStage // Apply other filters in the query
-        }
-      });
-    } else {
-      // Regular match if no location search
-      pipeline.push({ $match: matchStage });
-    }
-
-    // Add population and projection stages
-    pipeline.push(
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'owner',
-          foreignField: '_id',
-          as: 'owner',
-          pipeline: [{ $project: { name: 1, phone: 1 } }]
-        }
-      },
-      {
-        $unwind: '$owner'
-      },
-      {
-        $project: {
-          verificationDocuments: 0
-        }
+    // Resolve owner: landowner uses self; admin can specify ownerEmail or fallback to any landowner
+    let owner = null;
+    if (req.user.role === 'landowner') {
+      owner = req.user;
+    } else if (req.user.role === 'admin') {
+      if (ownerEmail) {
+        owner = await require('../models/User').findOne({ email: ownerEmail });
+        if (!owner) return res.status(404).json({ success: false, message: `Owner not found: ${ownerEmail}` });
+      } else {
+        owner = await require('../models/User').findOne({ role: 'landowner' });
+        if (!owner) owner = req.user; // fallback to admin
       }
-    );
-
-    // Add sorting - distance first if location search, then rating
-    if (lat && lng) {
-      pipeline.push({ $sort: { distance: 1, 'rating.average': -1, createdAt: -1 } });
-    } else {
-      pipeline.push({ $sort: { 'rating.average': -1, createdAt: -1 } });
     }
 
-    // Add pagination
-    const skip = (page - 1) * limit;
-    pipeline.push({ $skip: skip }, { $limit: parseInt(limit) });
+    // Build Overpass QL query (limit at source)
+    const qCore = mode === 'all'
+      ? `nwr(around:${radiusMeters},${lat},${lng})["amenity"="parking"];`
+      : `node(around:${radiusMeters},${lat},${lng})["amenity"="parking"];`;
+    const queryQL = `
+      [out:json][timeout:25];
+      ${qCore}
+      out center ${Math.min(limit, 50)};
+    `;
 
-    // Execute aggregation pipeline and count
-    const [lots, totalResult] = await Promise.all([
-      ParkingLot.aggregate(pipeline),
-      ParkingLot.aggregate([
-        ...(lat && lng ? 
-          [{
-            $geoNear: {
-              near: {
-                type: 'Point',
-                coordinates: [parseFloat(lng), parseFloat(lat)]
-              },
-              distanceField: 'distance',
-              maxDistance: radius * 1000,
-              spherical: true,
-              query: matchStage
-            }
-          }] : 
-          [{ $match: matchStage }]
-        ),
-        { $count: 'total' }
-      ])
-    ]);
+    // Overpass POST with timeout and mirror fallback
+    const https = require('https');
+    const { URL } = require('url');
+    const mirrorMap = {
+      de: 'https://overpass-api.de/api/interpreter',
+      kumi: 'https://overpass.kumi.systems/api/interpreter',
+      ru: 'https://overpass.openstreetmap.ru/api/interpreter',
+    };
+    const overpassUrlPrimary = mirrorMap[mirror] || mirrorMap.kumi;
+    const overpassUrlAlt = overpassUrlPrimary === mirrorMap.kumi ? mirrorMap.de : mirrorMap.kumi;
 
-    const total = totalResult.length > 0 ? totalResult[0].total : 0;
-
-    // Calculate pagination info
-    const totalPages = Math.ceil(total / limit);
-    const hasNext = page < totalPages;
-    const hasPrev = page > 1;
-
-    res.status(200).json({
-      success: true,
-      message: 'Parking lots fetched successfully',
-      data: {
-        lots,
-        pagination: {
-          current: parseInt(page),
-          total: totalPages,
-          hasNext,
-          hasPrev,
-          totalLots: total
-        }
-      }
+    const postFormWithTimeout = (url, formData, timeoutMs = 7000) => new Promise((resolve, reject) => {
+      const u = new URL(url);
+      const opts = { method: 'POST', hostname: u.hostname, path: u.pathname + (u.search || ''), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
+      const reqp = https.request(opts, (resp) => {
+        let data = '';
+        resp.on('data', (c) => (data += c));
+        resp.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch (e) { reject(new Error(`Invalid JSON from Overpass: ${e?.message || e}`)); }
+        });
+      });
+      reqp.on('error', (err) => reject(new Error(err?.message || String(err))));
+      reqp.setTimeout(timeoutMs, () => { reqp.destroy(new Error('Overpass request timeout')); });
+      reqp.write('data=' + encodeURIComponent(formData));
+      reqp.end();
     });
+
+    // Simple cache to avoid repeated Overpass hits for same area
+    const cacheKey = `${mode}|${Math.round(lat*10000)},${Math.round(lng*10000)}|${radiusMeters}|${Math.min(limit,50)}`;
+    let elements;
+    const cached = OSM_CACHE.get(cacheKey);
+    if (cached && (Date.now() - cached.ts) < OSM_CACHE_TTL_MS) {
+      elements = cached.data;
+    } else {
+      let overpass;
+      try {
+        overpass = await postFormWithTimeout(overpassUrlPrimary, queryQL, 7000);
+      } catch (e1) {
+        console.warn('Overpass primary mirror failed or timed out:', e1?.message || e1);
+        try {
+          overpass = await postFormWithTimeout(overpassUrlAlt, queryQL, 7000);
+        } catch (e2) {
+          console.error('Overpass alt mirror failed:', e2?.message || e2);
+          return res.status(504).json({ success: false, message: 'OSM import timed out', details: e2?.message || String(e2) });
+        }
+      }
+      elements = Array.isArray(overpass?.elements) ? overpass.elements : [];
+      OSM_CACHE.set(cacheKey, { ts: Date.now(), data: elements });
+    }
+
+    if (!elements.length) {
+      return res.status(200).json({ success: true, message: 'No OSM parking found in area', data: { createdCount: 0, updatedCount: 0, skippedCount: 0 } });
+    }
+
+    // Persist to DB
+    const ParkingLot = require('../models/ParkingLot');
+    const toProcess = elements.slice(0, limit);
+    const created = []; const updated = []; const skipped = [];
+    for (const el of toProcess) {
+      try {
+        const tags = el.tags || {};
+        const center = el.center || (el.type === 'node' ? { lat: el.lat, lon: el.lon } : null);
+        if (!center || typeof center.lat !== 'number' || typeof center.lon !== 'number') { skipped.push({ id: el.id, reason: 'no-center' }); continue; }
+
+        const name = tags.name || 'Parking (OSM)';
+        const totalCap = Math.max(20, parseInt(tags.capacity || '0', 10) || (tags.parking === 'multi-storey' ? 120 : tags.parking === 'underground' ? 100 : 60));
+        const available = Math.max(0, Math.round(totalCap * 0.85));
+
+        const amenityFlags = {
+          covered: tags.covered === 'yes' || tags.parking === 'multi-storey' || tags.parking === 'underground',
+          security: tags.surveillance === 'yes',
+          cctv: tags.surveillance === 'yes',
+          lighting: tags.lit === 'yes',
+          washroom: tags.toilets === 'yes',
+          'ev-charging': tags.charging === 'yes' || tags['charging_station'] === 'yes'
+        };
+        const amenities = Object.entries(amenityFlags).filter(([k,v]) => v).map(([k]) => k);
+
+        const hourly = 20 + (amenityFlags.covered ? 10 : 0) + (amenityFlags.security ? 10 : 0) + (amenityFlags['ev-charging'] ? 10 : 0);
+
+        const existing = await ParkingLot.findOne({ name, 'location.coordinates': { $near: { $geometry: { type: 'Point', coordinates: [center.lon, center.lat] }, $maxDistance: 25 } } });
+        const doc = {
+          name,
+          description: tags.operator ? `Operated by ${tags.operator}` : 'Imported from OpenStreetMap',
+          owner: owner._id,
+          location: { type: 'Point', coordinates: [center.lon, center.lat], address: { street: '', city: 'Unknown', state: 'Unknown', zipCode: '', country: 'Unknown' }, landmarks: [] },
+          capacity: { total: totalCap, available, reserved: totalCap - available },
+          vehicleTypes: ['car'],
+          pricing: { hourly, daily: hourly * 8, currency: 'INR' },
+          amenities,
+          operatingHours: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].reduce((a,d)=>{a[d]={open:'06:00',close:'23:00',is24Hours:false};return a;},{}),
+          rating: { average: 0, count: 0 },
+          status: 'active'
+        };
+
+        if (existing) { existing.description = doc.description; existing.capacity = doc.capacity; existing.pricing = doc.pricing; existing.amenities = doc.amenities; await existing.save(); updated.push(existing._id.toString()); }
+        else { const createdLot = await ParkingLot.create(doc); try { await createdLot.generateSlots({ levels: 1, rows: 5, cols: 10, type: 'car' }); } catch {} created.push(createdLot._id.toString()); }
+      } catch (e) { skipped.push({ id: el.id, error: e.message || String(e) }); }
+    }
+
+    return res.status(200).json({ success: true, message: 'OSM import complete', data: { createdCount: created.length, updatedCount: updated.length, skippedCount: skipped.length, created, updated, skipped } });
   } catch (error) {
-    console.error('Get parking lots error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error fetching parking lots'
-    });
+    console.error('OSM import error:', error);
+    return res.status(500).json({ success: false, message: 'OSM import failed', details: error.message || String(error) });
   }
 });
-
-// @desc    Get nearby parking lots (lightweight for maps)
+// @desc    Get nearby parking lots
 // @route   GET /api/parking/nearby
-// @access  Public
-// Params: lat,lng (required), radius (km, default 5)
+// @access  Public (auth optional)
 router.get('/nearby', [
   query('lat').isFloat().withMessage('Latitude required'),
   query('lng').isFloat().withMessage('Longitude required'),
-  query('radius').optional().isInt({ min:1, max:50 }).withMessage('Radius 1-50km')
+  query('radius').optional().isInt({ min: 1, max: 100 }).withMessage('radius (km) must be 1-100')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success:false, message:'Validation failed', errors: errors.array() });
     }
-    const { lat, lng, radius = 5 } = req.query;
+
+    const { lat, lng } = req.query;
+    const radius = parseInt(req.query.radius || '5', 10); // km
+
     const lots = await ParkingLot.aggregate([
       { $geoNear: {
           near: { type:'Point', coordinates:[parseFloat(lng), parseFloat(lat)] },
           distanceField: 'distance',
-          maxDistance: parseInt(radius) * 1000,
+          maxDistance: radius * 1000,
           spherical: true,
           query: { status:'active', 'capacity.available': { $gt: 0 } }
       }},
@@ -382,6 +547,209 @@ router.get('/nearby', [
     res.status(500).json({ success:false, message:'Server error fetching nearby lots' });
   }
 });
+
+// --- Import nearby parking places from Google Places and persist to DB ---
+// @desc    Import Google Places (type=parking) into ParkingLot collection
+// @route   POST /api/parking/import/places
+// @access  Private (admin or landowner)
+// Query: lat,lng (required), radiusMeters (optional, default 2000), limit (1-20, default 10), ownerEmail (admin only)
+router.post('/import/places', protect, authorize('admin', 'landowner'), [
+  query('lat').isFloat().withMessage('Latitude required'),
+  query('lng').isFloat().withMessage('Longitude required'),
+  query('radiusMeters').optional().isInt({ min: 100, max: 50000 }).withMessage('radiusMeters 100-50000'),
+  query('limit').optional().isInt({ min: 1, max: 20 }).withMessage('limit 1-20'),
+  query('ownerEmail').optional().isString()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success:false, message:'Validation failed', errors: errors.array() });
+    }
+
+    const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY;
+    if (!GOOGLE_KEY) {
+      return res.status(500).json({ success:false, message:'Server is missing GOOGLE_MAPS_API_KEY' });
+    }
+
+    const { lat, lng } = req.query;
+    const radiusMeters = parseInt(req.query.radiusMeters || '2000', 10);
+    const limit = parseInt(req.query.limit || '10', 10);
+    const ownerEmail = req.query.ownerEmail;
+
+    // Resolve owner: admin can assign by email; landowner defaults to self
+    let ownerId = req.user._id;
+    if (req.user.role === 'admin' && ownerEmail) {
+      const User = require('../models/User');
+      const ownerDoc = await User.findOne({ email: ownerEmail.toLowerCase() });
+      if (!ownerDoc) return res.status(404).json({ success:false, message:`Owner with email ${ownerEmail} not found` });
+      if (!['landowner','admin'].includes(ownerDoc.role)) return res.status(400).json({ success:false, message:'Owner must be landowner/admin role' });
+      ownerId = ownerDoc._id;
+    }
+
+    // Minimal HTTPS helpers without extra deps
+    const https = require('https');
+    function postJson(url, headers, bodyObj) {
+      return new Promise((resolve, reject) => {
+        const u = new URL(url);
+        const options = {
+          method: 'POST',
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ''),
+          headers: { 'Content-Type': 'application/json', ...headers },
+        };
+        const req = https.request(options, (resp) => {
+          let data = '';
+          resp.on('data', (chunk) => { data += chunk; });
+          resp.on('end', () => {
+            try { resolve(JSON.parse(data)); } catch (e) { reject(new Error(`Invalid JSON from ${url}: ${e?.message || e}`)); }
+          });
+        });
+        req.on('error', (err) => reject(new Error(err?.message || String(err))));
+        req.write(JSON.stringify(bodyObj || {}));
+        req.end();
+      });
+    }
+
+    // Places API (New) v1: searchNearby
+    const fieldMask = [
+      'places.id',
+      'places.displayName',
+      'places.formattedAddress',
+      'places.location',
+      'places.rating',
+      'places.userRatingCount'
+    ].join(',');
+    const headers = { 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': fieldMask };
+    const body = {
+      includedTypes: ['parking'],
+      maxResultCount: Math.min(20, limit),
+      locationRestriction: {
+        circle: {
+          center: { latitude: parseFloat(lat), longitude: parseFloat(lng) },
+          radius: parseFloat(radiusMeters)
+        }
+      }
+    };
+    const nearby = await postJson('https://places.googleapis.com/v1/places:searchNearby', headers, body);
+    if (nearby.error) {
+      return res.status(502).json({ success:false, message:`Places Nearby error: ${nearby.error.status}`, details: nearby.error.message });
+    }
+    let results = Array.isArray(nearby.places) ? nearby.places : [];
+
+    // Fallback: if Nearby returns 0, try Text Search with location bias
+    if (!results.length) {
+      try {
+        const textBody = {
+          textQuery: 'parking',
+          pageSize: Math.min(20, limit),
+          locationBias: {
+            circle: {
+              center: { latitude: parseFloat(lat), longitude: parseFloat(lng) },
+              radius: parseFloat(radiusMeters)
+            }
+          }
+        };
+        const textRes = await postJson('https://places.googleapis.com/v1/places:searchText', headers, textBody);
+        if (!textRes.error) {
+          const textPlaces = Array.isArray(textRes.places) ? textRes.places : [];
+          if (textPlaces.length) {
+            results = textPlaces;
+          }
+        }
+      } catch (e) {
+        // Silent fallback failure; keep results empty
+        console.warn('Places Text Search fallback failed:', e?.message || e);
+      }
+    }
+    const created = []; const updated = []; const skipped = [];
+
+    // Helper to extract city/state from address_components
+    function extractAddressComponents(components = []) {
+      const get = (type) => {
+        const comp = components.find(c => (c.types || []).includes(type));
+        return comp ? comp.long_name : undefined;
+      };
+      const city = get('locality') || get('sublocality_level_1') || get('administrative_area_level_2') || 'Unknown';
+      const state = get('administrative_area_level_1') || 'Unknown';
+      const country = get('country') || 'India';
+      const postal = get('postal_code');
+      return { city, state, country, zipCode: postal };
+    }
+
+  // We already requested needed fields; if more needed, we could call v1 details.
+
+  for (const r of results) {
+      try {
+        const placeId = r.id;
+        const name = r?.displayName?.text || 'Unnamed Parking';
+        const loc = r?.location || null;
+        if (!loc) { skipped.push({ placeId, reason: 'no-geometry' }); continue; }
+        const existing = await ParkingLot.findOne({ 'location.coordinates': { $near: { $geometry: { type: 'Point', coordinates: [loc.longitude, loc.latitude] }, $maxDistance: 15 } }, name });
+        const addr = extractAddressComponents([]); // fallback until details needed
+        const totalCap = Math.max(20, Math.round((r.userRatingCount || 50) / 2));
+        const available = Math.max(0, Math.round(totalCap * 0.85));
+        const amenitiesPool = ['covered','security','cctv','lighting','washroom','ev-charging','car-wash','valet-service'];
+        const amenities = amenitiesPool.filter(() => Math.random() > 0.5).slice(0, 5);
+        const hourly = 30 + Math.round((r.rating || 3.5) * 10); // simplistic pricing heuristic
+        const operatingHours = (() => {
+          const oh = {};
+          const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+          for (const d of days) oh[d] = { open: '06:00', close: '23:00', is24Hours: false };
+          return oh;
+        })();
+
+        const doc = {
+          name,
+          description: r?.formattedAddress || 'Imported from Google Places',
+          owner: ownerId,
+          location: {
+            type: 'Point',
+            coordinates: [loc.longitude, loc.latitude],
+            address: {
+              street: '',
+              city: addr.city,
+              state: addr.state,
+              zipCode: addr.zipCode,
+              country: addr.country
+            },
+            landmarks: []
+          },
+          capacity: { total: totalCap, available, reserved: totalCap - available },
+          vehicleTypes: ['car'],
+          pricing: { hourly, daily: hourly * 8, currency: 'INR' },
+          amenities,
+          operatingHours,
+          rating: { average: r.rating || 0, count: r.userRatingCount || 0 },
+          status: 'active'
+        };
+
+        if (existing) {
+          // Update selected mutable fields
+          existing.description = doc.description;
+          existing.capacity = doc.capacity;
+          existing.pricing = doc.pricing;
+          existing.amenities = doc.amenities;
+          existing.rating = doc.rating;
+          await existing.save();
+          updated.push({ id: existing._id, name });
+        } else {
+          const createdLot = await ParkingLot.create(doc);
+          // Optionally generate a simple slot layout
+          try { await createdLot.generateSlots({ levels: 1, rows: 5, cols: 10, type: 'car' }); } catch (e) { console.warn('generateSlots failed:', e?.message || e); }
+          created.push({ id: createdLot._id, name });
+        }
+      } catch (e) {
+        skipped.push({ error: e.message || String(e), name: r?.name });
+      }
+    }
+
+    return res.status(200).json({ success:true, message:'Import complete', data: { createdCount: created.length, updatedCount: updated.length, skippedCount: skipped.length, created, updated, skipped } });
+  } catch (error) {
+    console.error('Import places error:', error);
+    res.status(500).json({ success:false, message:'Server error importing places' });
+  }
+});
+
 
 // @desc    Get single parking lot details
 // @route   GET /api/parking/:id

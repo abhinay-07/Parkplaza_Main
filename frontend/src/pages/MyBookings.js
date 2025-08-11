@@ -32,6 +32,19 @@ const MyBookings = () => {
   const handleCancelBooking = () => alert('Cancellation API not implemented yet');
   const handleExtendBooking = () => alert('Extension API not implemented yet');
 
+  const handleDownloadTicket = (booking) => {
+    const qrData = {
+      bookingId: booking.id,
+      parkingLot: booking.lotName,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      slotType: booking.slotType,
+      slotNumber: booking.slotNumber
+    };
+    console.log('Download ticket:', qrData);
+    alert('Ticket download with QR would be implemented here.');
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'active':
@@ -110,6 +123,11 @@ const MyBookings = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {location.state?.highlightBookingId && (
+          <div className="mb-4 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded">
+            Booking created successfully. You can download your ticket below.
+          </div>
+        )}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">My Bookings</h1>
           <p className="text-gray-600 mt-2">Manage your parking bookings and view history</p>
@@ -261,6 +279,12 @@ const MyBookings = () => {
                           Extend (2 hours)
                         </button>
                       )}
+                      <button
+                        onClick={() => handleDownloadTicket(booking)}
+                        className="text-sm text-green-700 hover:text-green-600 font-medium"
+                      >
+                        Download Ticket
+                      </button>
                       
                       <Link
                         to={`/parking/${booking.lotId}`}

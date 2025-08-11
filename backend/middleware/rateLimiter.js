@@ -12,7 +12,8 @@ const createRateLimit = (windowMs, max, message) => {
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => {
-      // Skip rate limiting for health check
+      // Skip rate limiting for health check and CORS preflight
+      if (req.method === 'OPTIONS') return true;
       return req.path === '/api/health';
     }
   });

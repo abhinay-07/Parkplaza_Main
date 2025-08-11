@@ -22,6 +22,7 @@ const ParkingLotDetails = lazy(() => import('./pages/ParkingLotDetails'));
 const MyBookings = lazy(() => import('./pages/MyBookings'));
 const ServicesPage = lazy(() => import('./pages/ServicesPage'));
 const ParkingMapDemo = lazy(() => import('./components/maps/ParkingMap'));
+// Removed separate OSM Explore page; Home uses OSM/Leaflet now
 
 // Redux actions
 import { loadUser } from './store/slices/authSlice';
@@ -80,6 +81,7 @@ function App() {
               <Route path="/services" element={<ServicesPage />} />
               {/* Demo: standalone ParkingMap using Places API */}
               <Route path="/demo/parking-map" element={<ParkingMapDemo />} />
+              {/* OSM explorer removed; Home contains free map */}
               
               {/* Booking Flow Routes */}
               <Route path="/booking" element={<BookingPage />} />
