@@ -32,11 +32,12 @@ process.stdin.resume();
 console.log('[trace] stdin resumed');
 
 // Import routes (instrumented)
-let authRoutes, parkingRoutes, bookingRoutes, servicesRoutes;
+let authRoutes, parkingRoutes, bookingRoutes, servicesRoutes, placesRoutes;
 try { authRoutes = require('./routes/auth'); console.log('[trace] authRoutes loaded'); } catch (e) { console.error('[trace][err] authRoutes', e); }
 try { parkingRoutes = require('./routes/parking'); console.log('[trace] parkingRoutes loaded'); } catch (e) { console.error('[trace][err] parkingRoutes', e); }
 try { bookingRoutes = require('./routes/booking'); console.log('[trace] bookingRoutes loaded'); } catch (e) { console.error('[trace][err] bookingRoutes', e); }
 try { servicesRoutes = require('./routes/services'); console.log('[trace] servicesRoutes loaded'); } catch (e) { console.error('[trace][err] servicesRoutes', e); }
+try { placesRoutes = require('./routes/places'); console.log('[trace] placesRoutes loaded'); } catch (e) { console.error('[trace][err] placesRoutes', e); }
 
 // Import middleware
 const authMiddleware = require('./middleware/authMiddleware');
@@ -58,18 +59,25 @@ const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 console.log('[trace] PORT resolved:', PORT);
 
-// Middleware
+// Middleware (CORS must be first so preflight gets headers)
+const allowAllCors = String(process.env.CORS_ALLOW_ALL || '').toLowerCase() === 'true';
+const corsOptions = {
+  origin: allowAllCors ? true : (process.env.FRONTEND_URL || "http://localhost:3000"),
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With'],
+  optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions));
+
 app.use(helmet({
   crossOriginEmbedderPolicy: false, // Allow embedding for Maps
 }));
 app.use(performanceMonitor);
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', { stream: logger.stream }));
 app.use(generalLimiter);
-const allowAllCors = String(process.env.CORS_ALLOW_ALL || '').toLowerCase() === 'true';
-app.use(cors({
-  origin: allowAllCors ? true : (process.env.FRONTEND_URL || "http://localhost:3000"),
-  credentials: true
-}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 console.log('[trace] Core middleware mounted');
@@ -149,8 +157,9 @@ async function connectWithRetry(uri, isFallback = false) {
       logger.warn(`⏲ Next retry in ${backoffMs}ms (max ${MAX_RETRIES} attempts).`);
       setTimeout(() => connectWithRetry(uri, isFallback), backoffMs).unref();
     } else {
-      if (!isFallback && allowLocalFallback && uri !== localFallbackURI) {
-        // Try a local fallback connection once primary exhausted
+      // Primary attempts exhausted
+      const canFallback = !isFallback && allowLocalFallback && uri !== localFallbackURI;
+      if (canFallback) {
         logger.error('🛑 Max MongoDB retry attempts reached for primary. Attempting local fallback...');
         attempts = 0; // reset attempts for fallback
         firstConnectAttemptAt = Date.now();
@@ -226,6 +235,9 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/parking', parkingRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/services', servicesRoutes);
+if (placesRoutes) {
+  app.use('/api/places', placesRoutes);
+}
 console.log('[trace] Routes registered');
 
 // Optionally serve built frontend for quick sharing (set SERVE_FRONTEND=true)
@@ -246,6 +258,26 @@ app.get('/api/health', (req, res) => {
     message: 'ParkPlaza API is running',
   mongoConnected,
     timestamp: new Date().toISOString()
+  });
+});
+
+// CORS diagnostics
+app.get('/api/diagnostics/cors', (req, res) => {
+  res.set('Access-Control-Allow-Origin', process.env.FRONTEND_URL || 'http://localhost:3000');
+  res.json({
+    originReceived: req.headers.origin,
+    allowedOrigin: process.env.FRONTEND_URL || 'http://localhost:3000'
+  });
+});
+
+// Maps status endpoint (diagnostics only; does not expose keys)
+app.get('/api/maps/status', (req, res) => {
+  res.status(200).json({
+    success: true,
+    hasBackendKey: Boolean(process.env.GOOGLE_MAPS_API_KEY),
+    hasFrontendKey: Boolean(process.env.REACT_APP_GOOGLE_MAPS_API_KEY),
+    frontendOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    environment: process.env.NODE_ENV || 'development',
   });
 });
 

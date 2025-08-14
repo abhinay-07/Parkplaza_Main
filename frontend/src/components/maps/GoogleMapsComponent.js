@@ -18,7 +18,11 @@ const GoogleMapsComponent = ({
   needPlaces = false, // allow caller to skip Places library if not required
   lazy = true, // viewport-based lazy load
   idleDelay = 0, // additional ms delay after visible before loading
-  debug = false // log internal state transitions
+  debug = false, // log internal state transitions
+  allowFullscreen = true,
+  autoFullscreen = true,
+  autoFallback = true,
+  fallbackDelayMs = 3000
 }) => {
   const mapRef = useRef(null);
   const containerRef = useRef(null);
@@ -31,6 +35,9 @@ const GoogleMapsComponent = ({
   const [googleLoaded, setGoogleLoaded] = useState(false);
   const [isVisible, setIsVisible] = useState(!lazy); // if not lazy, treat as visible immediately
   const visibilityForcedRef = useRef(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const classesRef = useRef({ Map: null, Marker: null, InfoWindow: null, Size: null, Point: null, LatLngBounds: null, AdvancedMarkerElement: null, PinElement: null });
+  const [initNonce, setInitNonce] = useState(0); // used to force re-init
 
   // Observe viewport visibility for lazy loading
   useEffect(() => {
@@ -67,6 +74,10 @@ const GoogleMapsComponent = ({
   useEffect(() => {
     if (!isVisible) return; // defer until visible
     let cancelled = false;
+    if (debug && typeof window !== 'undefined') {
+      window.GMAPS_DEBUG = true;
+      console.log('[GoogleMaps] Debug enabled');
+    }
     // Resolve API key from multiple sources to match loader setup
     const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY
       || (typeof document !== 'undefined' && document.querySelector('meta[name="gmaps-api-key"]')?.content)
@@ -79,14 +90,53 @@ const GoogleMapsComponent = ({
       if (debug) console.log('[GoogleMaps] Reusing existing map instance');
       return;
     }
-    (async () => {
+  (async () => {
       if (idleDelay > 0) await new Promise(r => setTimeout(r, idleDelay));
       try {
-        const google = await loadGoogleMaps(apiKey, { libraries: needPlaces ? ['places'] : [], retry: 2 });
+    if (debug) console.log('[GoogleMaps] Loading SDK…', { needPlaces, idleDelay });
+    const google = await loadGoogleMaps(apiKey, { libraries: needPlaces ? ['places'] : [], retry: 2, timeoutMs: 8000 });
         if (cancelled || !mapRef.current) return;
         setGoogleLoaded(true);
+        // Load required constructors using modular API when available
+        let MapCtor, MarkerCtor, InfoWindowCtor, SizeCtor, PointCtor, LatLngBoundsCtor, AdvancedMarkerElementCtor, PinElementCtor;
+        if (google.maps.importLibrary) {
+          const [mapsMod, markerMod, coreMod] = await Promise.all([
+            google.maps.importLibrary('maps'),
+            google.maps.importLibrary('marker'),
+            google.maps.importLibrary('core')
+          ]);
+          MapCtor = mapsMod?.Map || google.maps.Map;
+          // Prefer classic Marker from maps; fall back to marker library or global
+          MarkerCtor = mapsMod?.Marker || markerMod?.Marker || google.maps.Marker;
+          InfoWindowCtor = mapsMod?.InfoWindow || markerMod?.InfoWindow || google.maps.InfoWindow;
+          SizeCtor = coreMod?.Size || google.maps.Size;
+          PointCtor = coreMod?.Point || google.maps.Point;
+          LatLngBoundsCtor = coreMod?.LatLngBounds || mapsMod?.LatLngBounds || google.maps.LatLngBounds;
+          AdvancedMarkerElementCtor = markerMod?.AdvancedMarkerElement;
+          PinElementCtor = markerMod?.PinElement;
+        } else {
+          MapCtor = google.maps.Map;
+          MarkerCtor = google.maps.Marker;
+          InfoWindowCtor = google.maps.InfoWindow;
+          SizeCtor = google.maps.Size;
+          PointCtor = google.maps.Point;
+          LatLngBoundsCtor = google.maps.LatLngBounds;
+          AdvancedMarkerElementCtor = google.maps?.marker?.AdvancedMarkerElement;
+          PinElementCtor = google.maps?.marker?.PinElement;
+        }
+        classesRef.current = { Map: MapCtor, Marker: MarkerCtor, InfoWindow: InfoWindowCtor, Size: SizeCtor, Point: PointCtor, LatLngBounds: LatLngBoundsCtor, AdvancedMarkerElement: AdvancedMarkerElementCtor, PinElement: PinElementCtor };
         const defaultCenter = userLocation || { lat: 28.6139, lng: 77.2090 };
-        const mapInstance = new google.maps.Map(mapRef.current, {
+        // Guard: if Map constructor is missing or not a function, fallback immediately
+        if (typeof classesRef.current.Map !== 'function') {
+          if (debug) console.error('[GoogleMaps] Map constructor unavailable, switching to fallback');
+          setError('Google Maps Map constructor unavailable');
+          setFallbackMode(true);
+          setLoading(false);
+          return;
+        }
+        let mapInstance;
+        try {
+          mapInstance = new classesRef.current.Map(mapRef.current, {
           center: defaultCenter,
           zoom,
           mapTypeControl: true,
@@ -94,12 +144,20 @@ const GoogleMapsComponent = ({
           fullscreenControl: true,
           zoomControl: true,
           styles: [{ featureType: 'poi.business', elementType: 'labels', stylers: [{ visibility: 'off' }] }]
-        });
+          });
+        } catch (e) {
+          console.error('Error creating Google Map instance:', e);
+          if (debug) console.error('[GoogleMaps] Map constructor error, switching to fallback');
+          setError('Failed to initialize Google Map');
+          setFallbackMode(true);
+          setLoading(false);
+          return;
+        }
         mapRef.current.__mapInstance = mapInstance;
         if (cancelled) return;
         setMap(mapInstance);
         setLoading(false);
-        if (debug) console.log('[GoogleMaps] Map initialized');
+  if (debug) console.log('[GoogleMaps] Map initialized');
       } catch (err) {
         if (cancelled) return;
         console.error('Error loading Google Maps:', err);
@@ -109,25 +167,52 @@ const GoogleMapsComponent = ({
       }
     })();
     return () => { cancelled = true; };
-  }, [needPlaces, isVisible, idleDelay]);
+  }, [needPlaces, isVisible, idleDelay, initNonce]);
+
+  // Auto-enable fullscreen if the allocated space is too small to be useful
+  useEffect(() => {
+    if (!allowFullscreen || !autoFullscreen) return;
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const check = () => {
+      const rect = el.getBoundingClientRect();
+      // Heuristic: if height < 240px or width < 320px and map is intended to show nearby POIs, go fullscreen
+      if (!isFullscreen && (rect.height < 240 || rect.width < 320)) {
+        setIsFullscreen(true);
+        if (debug) console.log('[GoogleMaps] Auto fullscreen due to small container', rect);
+      }
+    };
+    check();
+    const ro = new ResizeObserver(() => check());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [allowFullscreen, autoFullscreen, isFullscreen, debug]);
+
+  // Exit fullscreen on ESC
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
 
   // Show or update user location marker separately (no marker recreation for lots)
   useEffect(() => {
-    if (!map || !googleLoaded) return;
+  if (!map || !googleLoaded) return;
     if (!showUserLocation || !userLocation) return;
     // Only one user marker: reuse via ref on map object
     if (!map.__userMarker) {
-      map.__userMarker = new window.google.maps.Marker({
+      map.__userMarker = new classesRef.current.Marker({
         position: userLocation,
         map,
         title: 'Your Location',
         icon: {
           url: 'data:image/svg+xml;charset=UTF-8,%3csvg width="24" height="24" xmlns="http://www.w3.org/2000/svg"%3e%3ccircle cx="12" cy="12" r="8" fill="%234285F4"/%3e%3ccircle cx="12" cy="12" r="4" fill="white"/%3e%3c/svg%3e',
-          scaledSize: new window.google.maps.Size(24, 24),
-          anchor: new window.google.maps.Point(12, 12)
+          scaledSize: new classesRef.current.Size(24, 24),
+          anchor: new classesRef.current.Point(12, 12)
         }
       });
-    } else {
+  } else {
       map.__userMarker.setPosition(userLocation);
     }
   }, [map, googleLoaded, userLocation, showUserLocation]);
@@ -145,7 +230,7 @@ const GoogleMapsComponent = ({
       }
     }
 
-    const bounds = new window.google.maps.LatLngBounds();
+  const bounds = new (classesRef.current.LatLngBounds || window.google.maps.LatLngBounds)();
     let anyValid = false;
 
     // Batch creation using requestIdleCallback / rAF fallback
@@ -159,21 +244,42 @@ const GoogleMapsComponent = ({
       let markerColor = '#ef4444';
       if (availabilityRatio > 0.5) markerColor = '#22c55e';
       else if (availabilityRatio > 0.2) markerColor = '#eab308';
+      const hasAdvanced = typeof classesRef.current.AdvancedMarkerElement === 'function';
       const markerIcon = {
         url: `data:image/svg+xml;charset=UTF-8,%3csvg width="32" height="40" xmlns="http://www.w3.org/2000/svg"%3e%3cpath d="M16 0C7.2 0 0 7.2 0 16c0 16 16 24 16 24s16-8 16-24C32 7.2 24.8 0 16 0z" fill="${markerColor}"/%3e%3ccircle cx="16" cy="16" r="6" fill="white"/%3e%3ctext x="16" y="20" text-anchor="middle" font-family="Arial" font-size="10" font-weight="bold" fill="${markerColor}"%3eP%3c/text%3e%3c/svg%3e`,
-        scaledSize: new window.google.maps.Size(32, 40),
-        anchor: new window.google.maps.Point(16, 40)
+        scaledSize: new classesRef.current.Size(32, 40),
+        anchor: new classesRef.current.Point(16, 40)
       };
 
       let entry = markersRef.current.get(lotId);
       if (!entry) {
-        const marker = new window.google.maps.Marker({
-          position,
-          map,
-          title: lot.name,
-          icon: markerIcon
-        });
-        const infoWindow = new window.google.maps.InfoWindow({
+        let marker;
+        if (hasAdvanced) {
+          // Create an Advanced Marker with a styled pin or custom SVG
+          let contentEl = null;
+          if (typeof classesRef.current.PinElement === 'function') {
+            const pin = new classesRef.current.PinElement({ background: markerColor, glyph: 'P', glyphColor: '#fff' });
+            contentEl = pin.element;
+          } else {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = `<img alt="marker" src="${markerIcon.url}" width="32" height="40" />`;
+            contentEl = wrapper.firstChild;
+          }
+          marker = new classesRef.current.AdvancedMarkerElement({
+            position,
+            map,
+            title: lot.name,
+            content: contentEl
+          });
+        } else {
+          marker = new classesRef.current.Marker({
+            position,
+            map,
+            title: lot.name,
+            icon: markerIcon
+          });
+        }
+        const infoWindow = new classesRef.current.InfoWindow({
           content: `
             <div style="padding:12px;max-width:260px;font-family:Arial,sans-serif;">
               <h3 style="margin:0 0 6px;color:#1f2937;font-size:15px;">${lot.name}</h3>
@@ -198,24 +304,35 @@ const GoogleMapsComponent = ({
               </div>
             </div>`
         });
-        marker.addListener('click', () => {
-          infoWindow.open(map, marker);
+        const clickEvent = hasAdvanced ? 'gmp-click' : 'click';
+        marker.addListener(clickEvent, () => {
+          if (hasAdvanced) {
+            infoWindow.open({ map, anchor: marker });
+          } else {
+            infoWindow.open(map, marker);
+          }
           if (callback) callback(lot);
           if (recenterOnSelect) {
             map.setCenter(position);
             map.setZoom(16);
           }
         });
-        entry = { marker, infoWindow };
+        entry = { marker, infoWindow, isAdvanced: hasAdvanced };
         markersRef.current.set(lotId, entry);
       } else {
         // Update position & icon if changed
-        entry.marker.setPosition(position);
-        entry.marker.setIcon(markerIcon);
+        if (entry.isAdvanced) {
+          // Advanced markers: update position and (optionally) content
+          try { entry.marker.position = position; } catch (_) {}
+          // For simplicity, we keep the existing content
+        } else {
+          entry.marker.setPosition(position);
+          entry.marker.setIcon(markerIcon);
+        }
       }
     };
 
-    const lotsCopy = [...parkingLots];
+  const lotsCopy = [...parkingLots];
     let i = 0;
     const step = () => {
       const slice = lotsCopy.slice(i, i + 25); // batch 25 markers per frame
@@ -232,7 +349,8 @@ const GoogleMapsComponent = ({
         map.fitBounds(bounds); // Fit bounds once after all markers created
       }
     };
-    step();
+  if (debug) console.log('[GoogleMaps] Creating markers for lots:', parkingLots?.length || 0);
+  step();
   }, [map, parkingLots, onMarkerClick, onParkingLotSelect, recenterOnSelect, selectedLotId]);
 
   // Highlight / focus selection without recreating markers
@@ -240,7 +358,11 @@ const GoogleMapsComponent = ({
     if (!map || !selectedLotId) return;
     const entry = markersRef.current.get(String(selectedLotId));
     if (entry) {
-      entry.infoWindow.open(map, entry.marker);
+      if (entry.isAdvanced) {
+        entry.infoWindow.open({ map, anchor: entry.marker });
+      } else {
+        entry.infoWindow.open(map, entry.marker);
+      }
       if (recenterOnSelect) {
         map.setCenter(entry.marker.getPosition());
         map.setZoom(16);
@@ -274,6 +396,19 @@ const GoogleMapsComponent = ({
     }, 5000);
     return () => clearTimeout(t);
   }, [isVisible, googleLoaded]);
+
+  // Auto fallback to Leaflet if Google Maps fails to load after a grace period
+  useEffect(() => {
+    if (!autoFallback) return;
+    if (!isVisible || googleLoaded || fallbackMode) return;
+    const t = setTimeout(() => {
+      if (!window.google?.maps && !googleLoaded) {
+        if (debug) console.warn('[GoogleMaps] Auto fallback: Google Maps not available');
+        setFallbackMode(true);
+      }
+    }, Math.max(1000, fallbackDelayMs));
+    return () => clearTimeout(t);
+  }, [autoFallback, fallbackDelayMs, isVisible, googleLoaded, fallbackMode, debug]);
 
   // Leaflet fallback loader (kept early so hooks not conditional)
   useEffect(() => {
@@ -310,19 +445,62 @@ const GoogleMapsComponent = ({
     })();
   }, [fallbackMode, parkingLots, userLocation, zoom]);
 
+  // Auto-upgrade from fallback to Google Maps when SDK becomes available later
+  useEffect(() => {
+    if (!fallbackMode) return;
+    let stop = false;
+    const start = Date.now();
+    const maxMs = 30000; // watch up to 30s
+    const tick = async () => {
+      if (stop) return;
+      const g = window.google?.maps;
+      if (g) {
+        try {
+          const mapsMod = g.importLibrary ? await g.importLibrary('maps') : null;
+          const MapCtor = mapsMod?.Map || g.Map;
+          if (typeof MapCtor === 'function') {
+            // Cleanup Leaflet
+            if (mapRef.current?.__leafletMap) {
+              try { mapRef.current.__leafletMap.remove(); } catch (_) {}
+              mapRef.current.__leafletMap = null;
+            }
+            setError(null);
+            setFallbackMode(false);
+            setGoogleLoaded(false);
+            setLoading(true);
+            setInitNonce((n) => n + 1);
+            return; // stop ticking; init effect will run
+          }
+        } catch (_) {
+          // ignore and keep watching
+        }
+      }
+      if (Date.now() - start < maxMs) {
+        setTimeout(tick, 1000);
+      }
+    };
+    setTimeout(tick, 1000);
+    return () => { stop = true; };
+  }, [fallbackMode]);
+
   // Early return placeholders AFTER all hooks declared
   if (loading && !isVisible) {
+    // Render the map container even when deferred, so ref exists for when loading completes
     return (
-      <div ref={containerRef} style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', background:'#f3f4f6', borderRadius: '8px' }}>
-        <span style={{ fontSize:12, color:'#6b7280' }}>Map deferred… scroll into view</span>
+      <div ref={containerRef} style={{ height, position:'relative', background:'#f3f4f6', borderRadius: '8px' }}>
+        <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        <div style={{position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center'}}>
+          <span style={{ fontSize:12, color:'#6b7280' }}>Map deferred… scroll into view</span>
+        </div>
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div ref={containerRef} style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: '100%', height: '100%', position:'relative' }}>
+      <div ref={containerRef} style={{ height, position:'relative' }}>
+        <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        <div style={{ position:'absolute', inset:0 }}>
           <div style={{position:'absolute', inset:0, background:'#e5e7eb', animation:'pulse 1.5s ease-in-out infinite'}} />
           <style>{`@keyframes pulse {0%,100%{opacity:0.6;}50%{opacity:1;}}`}</style>
           <div style={{position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)', fontSize:12, color:'#374151'}}>Loading map…</div>
@@ -350,14 +528,51 @@ const GoogleMapsComponent = ({
           <p style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>Error Loading Map</p>
           <p style={{ margin: 0, fontSize: '14px' }}>{error}</p>
           <button onClick={() => setFallbackMode(true)} style={{marginTop:12, background:'#2563eb', color:'#fff', border:'none', padding:'6px 12px', borderRadius:6, cursor:'pointer', fontSize:13}}>Use Fallback Map</button>
+          <pre style={{marginTop:8, textAlign:'left', whiteSpace:'pre-wrap', color:'#7f1d1d'}}>{JSON.stringify({
+            hasGoogle: !!window.google,
+            script: !!document.getElementById('gmaps-sdk'),
+            keyFromEnv: !!process.env.REACT_APP_GOOGLE_MAPS_API_KEY
+          }, null, 2)}</pre>
         </div>
       </div>
     );
   }
 
+  const containerStyle = isFullscreen
+    ? { position: 'fixed', inset: 0, zIndex: 9999, width: '100vw', height: '100vh', background: '#fff' }
+    : { height, width: '100%', borderRadius: '8px', overflow: 'hidden', position: 'relative' };
+
   return (
-    <div ref={containerRef} style={{ height, width: '100%', borderRadius: '8px', overflow: 'hidden', position:'relative' }}>
+    <div ref={containerRef} style={containerStyle}>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+      {allowFullscreen && (
+        <div style={{position:'absolute', top:8, left:8, display:'flex', gap:8, zIndex:10}}>
+          {!isFullscreen && (
+            <button
+              onClick={() => setIsFullscreen(true)}
+              title="Fullscreen"
+              style={{background:'rgba(0,0,0,0.6)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12}}
+            >
+              Fullscreen
+            </button>
+          )}
+          {isFullscreen && (
+            <button
+              onClick={() => setIsFullscreen(false)}
+              title="Exit fullscreen (Esc)"
+              style={{background:'rgba(0,0,0,0.6)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:6, cursor:'pointer', fontSize:12}}
+            >
+              Exit
+            </button>
+          )}
+        </div>
+      )}
+      {fallbackMode && (
+        <div style={{position:'absolute', bottom:8, right:8, background:'rgba(0,0,0,0.6)', color:'#fff', padding:'6px 10px', borderRadius:6, fontSize:12}}>
+          Using fallback map
+          <button onClick={() => { setFallbackMode(false); setInitNonce((n)=>n+1); }} style={{marginLeft:8, background:'#3b82f6', color:'#fff', border:'none', padding:'4px 8px', borderRadius:4, cursor:'pointer'}}>Try Google</button>
+        </div>
+      )}
       {diagVisible && !googleLoaded && !fallbackMode && (
         <div style={{position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.65)', color:'#fff', padding:'8px 10px', borderRadius:6, fontSize:12, maxWidth:260}}>
           <strong style={{display:'block', marginBottom:4}}>Map Diagnostics</strong>
@@ -403,5 +618,9 @@ GoogleMapsComponent.propTypes = {
   lazy: PropTypes.bool,
   idleDelay: PropTypes.number,
   debug: PropTypes.bool,
+  allowFullscreen: PropTypes.bool,
+  autoFullscreen: PropTypes.bool,
+  autoFallback: PropTypes.bool,
+  fallbackDelayMs: PropTypes.number,
 };
 // Default prop values are provided via parameter destructuring in the component signature.

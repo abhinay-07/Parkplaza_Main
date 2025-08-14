@@ -20,6 +20,7 @@ const ParkingMap = () => {
 
     const initMap = async () => {
       const apiKey = resolveApiKey();
+      console.log('[ParkingMap] init, apiKey?', !!apiKey);
       if (!apiKey) {
         // Surface a simple error state in place of the map
         if (mapRef.current) {
@@ -30,7 +31,7 @@ const ParkingMap = () => {
 
       try {
         // Load the Google Maps script via our loader with Places library
-        await loadGoogleMaps(apiKey, { libraries: ['places'], retry: 2 });
+        await loadGoogleMaps(apiKey, { libraries: ['places'], retry: 2, timeoutMs: 15000 });
         if (cancelled || !mapRef.current) return;
 
         // Initialize map
@@ -44,6 +45,7 @@ const ParkingMap = () => {
         setMap(mapInstance);
 
         // Places search for nearby parking
+        console.log('[ParkingMap] Map created. places?', !!window.google.maps.places);
         const placesService = new window.google.maps.places.PlacesService(mapInstance);
         placesService.nearbySearch(
           {
@@ -52,6 +54,7 @@ const ParkingMap = () => {
             keyword: 'parking',
           },
           (results, status) => {
+            console.log('[ParkingMap] nearbySearch status:', status, 'results?', Array.isArray(results) ? results.length : 0);
             if (status !== window.google.maps.places.PlacesServiceStatus.OK || !Array.isArray(results)) return;
             results.forEach((place) => {
               if (!place.geometry?.location) return;
@@ -79,6 +82,10 @@ const ParkingMap = () => {
         }
         // eslint-disable-next-line no-console
         console.error('ParkingMap init error:', err);
+        console.debug('[ParkingMap] diagnostics', {
+          hasGoogle: !!window.google,
+          script: !!document.getElementById('gmaps-sdk')
+        });
       }
     };
 

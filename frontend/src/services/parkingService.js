@@ -56,6 +56,21 @@ const parkingService = {
   reserveSlot: async (lotId, slotCode) => {
     const { data } = await parkingAPI.reserveSlot(lotId, slotCode);
     return data;
+  },
+  // Admin/Landowner: import places into DB
+  importPlaces: async ({ lat, lng, radiusMeters = 2000, limit = 10, ownerEmail }) => {
+    const { data } = await parkingAPI.importPlaces({ lat, lng, radiusMeters, limit, ownerEmail });
+    return data;
+  },
+  // Admin/Landowner: import OSM parking into DB (free)
+  importOSM: async ({ lat, lng, radiusMeters = 2000, limit = 10, ownerEmail }) => {
+    const { data } = await parkingAPI.importOSM({ lat, lng, radiusMeters, limit, ownerEmail });
+    return data;
+  },
+  // Dev: seed random lots near a location
+  seedRandomLots: async ({ lat, lng, count = 10, radiusMeters = 2000, ownerEmail }) => {
+    const { data } = await parkingAPI.seedRandom({ lat, lng, count, radiusMeters, ownerEmail });
+    return data;
   }
 };
 

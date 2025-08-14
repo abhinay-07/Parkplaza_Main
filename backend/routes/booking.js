@@ -280,6 +280,14 @@ router.post('/new', protect, [
     const taxes = (basePrice + serviceFees) * 0.18; // 18% GST
     const totalAmount = basePrice + serviceFees + taxes;
 
+    // Determine payment/booking status (dev simulate support)
+    const devAutoPay = (
+      String(process.env.ALLOW_DEV_AUTO_PAYMENT || '').toLowerCase() === 'true' ||
+      (payment && (payment.simulate === true || payment.devSimulate === true))
+    );
+    const paymentStatus = devAutoPay ? 'completed' : 'pending';
+    const bookingStatus = devAutoPay ? 'confirmed' : 'pending';
+
     // Create booking
     const booking = await Booking.create({
       user: req.user.id,
@@ -301,9 +309,10 @@ router.post('/new', protect, [
       services: serviceDetails,
       payment: {
         ...payment,
-        status: 'pending'
+        status: paymentStatus,
+        paidAt: devAutoPay ? new Date() : undefined
       },
-      status: 'pending'
+      status: bookingStatus
     });
 
     // Reserve the spot

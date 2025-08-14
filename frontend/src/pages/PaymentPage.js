@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import bookingService from '../services/bookingService';
 
 const PaymentPage = () => {
   const location = useLocation();
@@ -9,6 +10,11 @@ const PaymentPage = () => {
 
   const [paymentMethod, setPaymentMethod] = useState('credit-card');
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [licensePlate, setLicensePlate] = useState('');
+  const [confirmError, setConfirmError] = useState('');
+  const [finalBookingData, setFinalBookingData] = useState(null);
   const [formData, setFormData] = useState({
     cardNumber: '',
     expiryDate: '',
@@ -64,8 +70,8 @@ const PaymentPage = () => {
       // Simulate payment processing delay
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Create the booking data for backend
-      const finalBookingData = {
+      // Prepare the booking data to confirm before creating backend booking
+      const stubBookingData = {
         lotId: parkingLot.id,
         lotName: parkingLot.name,
         address: parkingLot.address,
@@ -85,30 +91,55 @@ const PaymentPage = () => {
         }
       };
 
-      // For now, simulate successful payment since we don't have payment gateway
-      console.log('Payment processed successfully:', {
-        paymentMethod,
-        bookingData: finalBookingData
-      });
-
-      // Generate booking ID for demo
-      const bookingId = `PK${Date.now()}`;
-      
-      // Navigate to success page
-      navigate('/booking-success', {
-        state: {
-          bookingId,
-          bookingData: finalBookingData,
-          parkingLot,
-          paymentMethod,
-          paymentStatus: 'completed'
-        }
-      });
+      // Simulate payment processed. Next, show confirmation step before creating booking.
+      console.log('Payment processed. Showing confirmation before booking creation.');
+      setFinalBookingData(stubBookingData);
+      setShowConfirmation(true);
     } catch (error) {
       console.error('Payment failed:', error);
       alert('Payment failed. Please try again.');
     } finally {
       setPaymentLoading(false);
+    }
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!finalBookingData) return;
+    setConfirmError('');
+    if (!licensePlate || licensePlate.trim().length < 3) {
+      setConfirmError('Please enter a valid license plate');
+      return;
+    }
+    setConfirming(true);
+    try {
+      // Map UI data to backend payload
+      const payload = {
+        parkingLot: finalBookingData.lotId,
+        vehicle: {
+          type: bookingData.slotType || 'car',
+          licensePlate: licensePlate.trim().toUpperCase()
+        },
+        bookingDetails: {
+          startTime: finalBookingData.startTime,
+          endTime: finalBookingData.endTime,
+          spotNumber: bookingData.slotCode || undefined
+        },
+        services: finalBookingData.services || [],
+        payment: {
+          method: (finalBookingData.paymentMethod === 'credit-card') ? 'card' : finalBookingData.paymentMethod,
+          simulate: true
+        }
+      };
+
+      const created = await bookingService.create(payload);
+      const createdId = created?.booking?._id || created?._id || created?.id;
+      // Redirect to My Bookings page; UI there will fetch and show the new booking
+      navigate('/my-bookings', { state: { highlightBookingId: createdId } });
+    } catch (err) {
+      console.error('Booking confirmation failed:', err);
+      setConfirmError(err?.message || 'Failed to create booking. Please try again.');
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -142,6 +173,88 @@ const PaymentPage = () => {
           <p className="text-lg text-gray-600">Secure your parking spot</p>
         </div>
 
+        {/* Confirmation step after payment */}
+        {showConfirmation ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Confirm Booking Details</h2>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-sm text-gray-600">Parking Lot</div>
+                      <div className="font-medium">{parkingLot.name}</div>
+                      <div className="text-sm text-gray-600">{parkingLot.address}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-600">Slot Type</div>
+                      <div className="font-medium capitalize">{bookingData.slotType}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-sm text-gray-600">Check-in</div>
+                      <div className="font-medium">{startTime.date} at {startTime.time}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-600">Check-out</div>
+                      <div className="font-medium">{endTime.date} at {endTime.time}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Vehicle License Plate</label>
+                    <input
+                      type="text"
+                      value={licensePlate}
+                      onChange={(e) => setLicensePlate(e.target.value)}
+                      placeholder="e.g. KA01AB1234"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {confirmError && (
+                      <p className="text-sm text-red-600 mt-2">{confirmError}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmation(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Back to Payment
+                </button>
+                <button
+                  onClick={handleConfirmBooking}
+                  disabled={confirming}
+                  className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-400"
+                >
+                  {confirming ? 'Confirming…' : 'Confirm & Create Booking'}
+                </button>
+              </div>
+            </div>
+
+            {/* Order Summary */}
+            <div className="lg:col-span-1">
+              <div className="bg-white rounded-lg border border-gray-200 p-6 sticky top-4">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Order Summary</h2>
+                <div className="space-y-3 mb-4 pb-4 border-b border-gray-200">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Duration:</span>
+                    <span className="font-medium">{duration} hours</span>
+                  </div>
+                </div>
+                <div className="mb-6">
+                  <div className="flex justify-between text-lg font-semibold text-gray-900">
+                    <span>Total Amount:</span>
+                    <span>₹{bookingData.totalAmount}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">Your payment is processed. Confirm to create the booking and view it in My Bookings.</p>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Payment Form */}
           <div className="lg:col-span-2 space-y-6">
@@ -391,7 +504,8 @@ const PaymentPage = () => {
               </div>
             </div>
           </div>
-        </div>
+  </div>
+  )}
       </div>
     </div>
   );

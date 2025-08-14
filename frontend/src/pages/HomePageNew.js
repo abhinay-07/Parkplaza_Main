@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useSelector } from 'react-redux';
-import GoogleMapsComponent from '../components/maps/GoogleMapsComponent';
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import ParkingLotCard from '../components/parking/ParkingLotCardNew';
 import SearchFilters from '../components/parking/SearchFiltersNew';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
@@ -22,6 +24,17 @@ const HomePage = () => {
     availabilityOnly: true
   });
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'list'
+
+  // Ensure Leaflet default icons work across bundlers
+  try {
+    // eslint-disable-next-line no-underscore-dangle
+    delete L.Icon.Default.prototype._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    });
+  } catch (_) {}
 
   // Get user location
   const { location: userLocation, loading: locationLoading, error: locationError } = useGeolocation();
@@ -298,13 +311,45 @@ const HomePage = () => {
                     Interactive Map
                   </h3>
                   <div className="h-96">
-                    <GoogleMapsComponent
-                      userLocation={userLocation}
-                      parkingLots={filteredLots}
-                      onParkingLotSelect={handleLotSelect}
-                      selectedLotId={selectedLot?.id}
-                      height="100%"
-                    />
+                    <MapContainer
+                      center={[userLocation?.lat || 28.6139, userLocation?.lng || 77.2090]}
+                      zoom={14}
+                      style={{ height: '100%', width: '100%' }}
+                    >
+                      <TileLayer
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution="&copy; OpenStreetMap contributors"
+                      />
+                      {userLocation && (
+                        <CircleMarker
+                          center={[userLocation.lat, userLocation.lng]}
+                          radius={8}
+                          pathOptions={{ color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 0.8 }}
+                        >
+                          <Popup>Your location</Popup>
+                        </CircleMarker>
+                      )}
+                      {filteredLots.map((lot) => (
+                        typeof lot?.lat === 'number' && typeof lot?.lng === 'number' ? (
+                          <Marker
+                            key={String(lot.id)}
+                            position={[lot.lat, lot.lng]}
+                            eventHandlers={{ click: () => handleLotSelect(lot) }}
+                          >
+                            <Popup>
+                              <div className="space-y-1">
+                                <div className="font-semibold">{lot.name}</div>
+                                <div className="text-xs text-gray-600">{lot.address}</div>
+                                <div className="text-xs">Avail: {lot.availableSlots}/{lot.totalSlots}</div>
+                                {lot.pricePerHour?.day != null && (
+                                  <div className="text-xs">Price: ₹{lot.pricePerHour.day}/hr</div>
+                                )}
+                              </div>
+                            </Popup>
+                          </Marker>
+                        ) : null
+                      ))}
+                    </MapContainer>
                   </div>
                 </div>
               ) : (

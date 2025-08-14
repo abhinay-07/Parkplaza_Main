@@ -4,8 +4,13 @@ import { bookingAPI } from './api';
 // Returns already unwrapped data (response.data.data or response.data) for convenience
 const bookingService = {
   create: async (payload) => {
-    const res = await bookingAPI.create(payload);
-    return res.data.data?.booking || res.data.data || res.data; // backend returns { data: { booking } }
+    try {
+      const res = await bookingAPI.create(payload);
+      return res.data.data?.booking || res.data.data || res.data; // backend returns { data: { booking } }
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to create booking';
+      throw new Error(msg);
+    }
   },
   myBookings: async (params = {}) => {
     const res = await bookingAPI.myBookings(params);
