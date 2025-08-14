@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import custom animations and effects */
+@import './styles/animations.css';
+
 /* Custom CSS */
 @layer base {
   html {
