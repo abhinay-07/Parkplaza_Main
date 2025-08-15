@@ -32,8 +32,9 @@ process.stdin.resume();
 console.log('[trace] stdin resumed');
 
 // Import routes (instrumented)
-let authRoutes, parkingRoutes, bookingRoutes, servicesRoutes, placesRoutes;
+let authRoutes, parkingRoutes, bookingRoutes, servicesRoutes, placesRoutes, contactRoutes;
 try { authRoutes = require('./routes/auth'); console.log('[trace] authRoutes loaded'); } catch (e) { console.error('[trace][err] authRoutes', e); }
+try { contactRoutes = require('./routes/contact'); console.log('[trace] contactRoutes loaded'); } catch (e) { console.error('[trace][err] contactRoutes', e); }
 try { parkingRoutes = require('./routes/parking'); console.log('[trace] parkingRoutes loaded'); } catch (e) { console.error('[trace][err] parkingRoutes', e); }
 try { bookingRoutes = require('./routes/booking'); console.log('[trace] bookingRoutes loaded'); } catch (e) { console.error('[trace][err] bookingRoutes', e); }
 try { servicesRoutes = require('./routes/services'); console.log('[trace] servicesRoutes loaded'); } catch (e) { console.error('[trace][err] servicesRoutes', e); }
@@ -232,6 +233,7 @@ app.use((req, res, next) => {
 
 // Routes with rate limiting
 app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/contact', contactRoutes);
 app.use('/api/parking', parkingRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/services', servicesRoutes);

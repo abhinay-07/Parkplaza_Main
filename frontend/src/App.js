@@ -8,6 +8,8 @@ import Footer from './components/layout/Footer';
 import LoadingSpinner from './components/ui/LoadingSpinner';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ui/ErrorBoundary';
+import AboutUs from './pages/AboutUs';
+import ContactUs from './pages/ContactUs';
 
 // Lazy-loaded Pages
 const HomePage = lazy(() => import('./pages/HomePageNew'));
@@ -84,6 +86,8 @@ function App() {
               {/* OSM explorer removed; Home contains free map */}
               
               {/* Booking Flow Routes */}
+              <Route path="/about" element={<AboutUs />} />
+              <Route path="/contact" element={<ContactUs />} />
               <Route path="/booking" element={<BookingPage />} />
               <Route path="/payment" element={<PaymentPage />} />
               <Route path="/booking-success" element={<BookingSuccessPage />} />
