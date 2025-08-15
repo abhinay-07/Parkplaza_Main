@@ -11,14 +11,15 @@ const ContactUs = () => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const API_URL = process.env.REACT_APP_API_URL || "https://parkplaza-main.onrender.com";
+  // Use a hardcoded backend URL for contact API only
+  const CONTACT_API_URL = "https://parkplaza-main.onrender.com/api/contact";
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setSubmitted(false);
     try {
-      const res = await fetch(`${API_URL}/api/contact`, {
+      const res = await fetch(CONTACT_API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
