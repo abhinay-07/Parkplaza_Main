@@ -36,11 +36,8 @@ router.post('/calculate-price', protect, [
     for (const id of services) {
       const svc = await Service.findById(id);
       if (svc) {
-        // Always add basePrice if not availableAt or inactive
-        let svcPrice = svc.getPriceFor(parkingLotId);
-        if (!svc.isAvailableAt(parkingLotId)) {
-          svcPrice = svc.pricing.basePrice;
-        }
+        // Always add the service's basePrice to the total if selected
+        const svcPrice = svc.pricing.basePrice;
         serviceFees += svcPrice;
         serviceBreakdown.push({ serviceId: svc._id, name: svc.name, price: svcPrice });
       }
