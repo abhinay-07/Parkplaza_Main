@@ -49,7 +49,12 @@ const Navbar = () => {
           <Button component={Link} to="/services" color="inherit" className="text-gray-700">
             Services
           </Button>
-          {/* Removed Explore Map page; Home now shows a free map */}
+          <Button component={Link} to="/about" color="inherit" className="text-gray-700">
+            About Us
+          </Button>
+          <Button component={Link} to="/contact" color="inherit" className="text-gray-700">
+            Contact Us
+          </Button>
 
           {isAuthenticated ? (
             <>
