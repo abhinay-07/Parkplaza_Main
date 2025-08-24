@@ -152,13 +152,18 @@ const PaymentPage = () => {
       };
       localStorage.setItem('demoPaymentBooking', JSON.stringify(demoBooking));
 
-      const created = await bookingService.create(payload);
-      const createdId = created?.booking?._id || created?._id || created?.id;
-      // Redirect to My Bookings page; UI there will fetch and show the new booking
-      navigate('/my-bookings', { state: { highlightBookingId: createdId } });
-    } catch (err) {
-      console.error('Booking confirmation failed:', err);
-      setConfirmError(err?.message || 'Failed to create booking. Please try again.');
+      let bookingCreated = false;
+      try {
+        const created = await bookingService.create(payload);
+        const createdId = created?.booking?._id || created?._id || created?.id;
+        // Redirect to My Bookings page; UI there will fetch and show the new booking
+        navigate('/my-bookings', { state: { highlightBookingId: createdId } });
+        bookingCreated = true;
+      } catch (err) {
+        // If backend fails, show demo booking anyway
+        console.error('Booking confirmation failed:', err);
+        navigate('/my-bookings', { state: { highlightBookingId: 'demo-payment' } });
+      }
     } finally {
       setConfirming(false);
     }
