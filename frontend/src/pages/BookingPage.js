@@ -100,24 +100,40 @@ const BookingPage = () => {
   const duration = calculateDuration();
 
   // Handle booking submission
-  const handleBooking = () => {
+  const handleBooking = async () => {
     if (!startDateTime || !endDateTime || !lotId) {
       alert('Please fill in all required fields');
       return;
     }
 
-    const bookingData = {
-      parkingLotId: lotId,
-      slotType,
-      startDateTime: new Date(startDateTime).toISOString(),
-      endDateTime: new Date(endDateTime).toISOString(),
+    const payload = {
+      parkingLot: lotId,
+      vehicle: {
+        type: slotType,
+        licensePlate: 'DEMO1234', // You may want to collect this from user
+      },
+      bookingDetails: {
+        startTime: new Date(startDateTime).toISOString(),
+        endTime: new Date(endDateTime).toISOString(),
+        spotNumber: selectedSlot?.code || undefined
+      },
       services: selectedServices,
-      totalAmount: (priceData?.total || priceData?.pricing?.totalAmount || 0),
-      slotCode: selectedSlot?.code || null
+      payment: {
+        method: 'upi', // or 'card', 'wallet', etc. You may want to collect this from user
+        simulate: true // For demo purposes
+      }
     };
 
-    // Navigate to payment page with booking data
-    navigate('/payment', { state: { bookingData, parkingLot } });
+    try {
+      // Call backend to create booking
+      const bookingService = require('../services/bookingService').default;
+      const created = await bookingService.create(payload);
+      const createdId = created?._id || created?.booking?._id || created?.id;
+      // Redirect to My Bookings page and highlight the new booking
+      navigate('/my-bookings', { state: { highlightBookingId: createdId } });
+    } catch (err) {
+      alert(err?.message || 'Failed to create booking. Please try again.');
+    }
   };
 
   if (!lotId) {
