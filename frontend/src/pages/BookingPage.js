@@ -132,7 +132,13 @@ const BookingPage = () => {
       // Redirect to My Bookings page and highlight the new booking
       navigate('/my-bookings', { state: { highlightBookingId: createdId } });
     } catch (err) {
-      alert(err?.message || 'Failed to create booking. Please try again.');
+      // Log error details for debugging
+      if (err?.response?.data) {
+        console.error('Booking error details:', err.response.data);
+        alert(`Booking failed: ${err.response.data.message || err.message}`);
+      } else {
+        alert(err?.message || 'Failed to create booking. Please try again.');
+      }
     }
   };
 
