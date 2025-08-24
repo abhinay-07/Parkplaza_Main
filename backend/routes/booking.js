@@ -222,12 +222,31 @@ router.post('/new', protect, [
       });
     }
 
-    // Check availability
+    // Check overall lot availability
     if (parkingLot.capacity.available <= 0) {
       return res.status(400).json({
         success: false,
         message: 'No parking spots available'
       });
+    }
+
+    // If a specific slot is requested, validate and reserve it
+    let reservedSlot = null;
+    if (bookingDetails.spotNumber) {
+      reservedSlot = parkingLot.slots.find(
+        slot => slot.code === bookingDetails.spotNumber && slot.status === 'available'
+      );
+      if (!reservedSlot) {
+        return res.status(400).json({
+          success: false,
+          message: 'Requested slot not found or not available'
+        });
+      }
+      // Mark slot as reserved in DB
+      await ParkingLot.updateOne(
+        { _id: parkingLot._id, 'slots.code': bookingDetails.spotNumber },
+        { $set: { 'slots.$.status': 'reserved' } }
+      );
     }
 
     // Check if lot supports vehicle type
