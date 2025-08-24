@@ -356,11 +356,12 @@ router.post('/new', protect, [
     });
 
   } catch (error) {
-    console.error('Create booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error creating booking'
-    });
+      console.error('Create booking error:', error);
+      res.status(500).json({
+        success: false,
+        message: error?.message || 'Server error creating booking',
+        error: (typeof error === 'object' && error !== null) ? (error.stack || error) : error
+      });
   }
 });
 
