@@ -131,6 +131,27 @@ const PaymentPage = () => {
         }
       };
 
+      // Store demo booking in localStorage for MyBookings demo
+      const demoBooking = {
+        id: 'demo-payment',
+        lotName: finalBookingData.lotName || 'Demo Payment Lot',
+        lotId: finalBookingData.lotId,
+        address: finalBookingData.address,
+        slotType: bookingData.slotType || 'car',
+        slotNumber: bookingData.slotCode || 'A1',
+        startTime: finalBookingData.startTime,
+        endTime: finalBookingData.endTime,
+        qrCode: 'PAYMENT-QR-' + Math.floor(Math.random()*1000000),
+        totalAmount: finalBookingData.totalAmount,
+        status: 'confirmed',
+        paymentStatus: 'paid',
+        createdAt: new Date().toISOString(),
+        services: finalBookingData.services || [],
+        licensePlate: licensePlate.trim().toUpperCase(),
+        paymentMethod: finalBookingData.paymentMethod
+      };
+      localStorage.setItem('demoPaymentBooking', JSON.stringify(demoBooking));
+
       const created = await bookingService.create(payload);
       const createdId = created?.booking?._id || created?._id || created?.id;
       // Redirect to My Bookings page; UI there will fetch and show the new booking
