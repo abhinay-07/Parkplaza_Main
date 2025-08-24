@@ -208,8 +208,13 @@ router.post('/new', protect, [
       payment
     } = req.body;
 
-    // Validate parking lot
-    const parkingLot = await ParkingLot.findById(parkingLotId);
+    // Accept either ObjectId or unique name for parkingLot
+    let parkingLot;
+    if (parkingLotId && parkingLotId.match(/^[a-fA-F0-9]{24}$/)) {
+      parkingLot = await ParkingLot.findById(parkingLotId);
+    } else if (parkingLotId && typeof parkingLotId === 'string') {
+      parkingLot = await ParkingLot.findOne({ name: parkingLotId });
+    }
     if (!parkingLot) {
       return res.status(404).json({
         success: false,
