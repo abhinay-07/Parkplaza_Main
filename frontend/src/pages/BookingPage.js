@@ -111,12 +111,10 @@ const MyBookings = () => {
     }
   };
 
-  const filteredBookings = bookings.filter(booking => {
-    // Use bookingsWithDemo for filtering and display
-    const filteredBookings = filter === 'all'
-      ? bookingsWithDemo
-      : bookingsWithDemo.filter(b => b.status === filter);
-
+  // Apply filter to bookingsWithDemo for display
+  const filteredBookings = filter === 'all'
+    ? bookingsWithDemo
+    : bookingsWithDemo.filter(b => b.status === filter);
   const formatDateTime = (dateTimeString) => {
     const date = new Date(dateTimeString);
     return date.toLocaleString('en-US', {
