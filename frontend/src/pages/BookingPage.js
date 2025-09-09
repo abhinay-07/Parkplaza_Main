@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useParkingLotDetails } from '../hooks/useAPI';
 import { useSelector } from 'react-redux';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
 
 // Simple booking page component (self-contained UI). This version focuses on the
 // front-end booking form: vehicle selection, floor/slot grid, time selection,
@@ -34,6 +35,9 @@ const BookingPage = () => {
   const urlParams = new URLSearchParams(location.search);
   const lotIdFromQuery = urlParams.get('lotId');
   const { parkingLot: queriedLot, loading: queriedLotLoading } = useParkingLotDetails(lotIdFromQuery);
+
+  // show loader while parking lot details load
+  if (queriedLotLoading) return <LoadingSpinner />;
 
   const [initializedFromLot, setInitializedFromLot] = React.useState(false);
   useEffect(() => {
