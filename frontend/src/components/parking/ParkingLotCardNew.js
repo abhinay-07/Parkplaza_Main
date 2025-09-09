@@ -1,6 +1,8 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const ParkingLotCard = ({ lot, onViewDetails, onBookNow, userLocation }) => {
+  const navigate = useNavigate();
   // Calculate distance if user location is available
   const calculateDistance = (lat1, lng1, lat2, lng2) => {
     const R = 6371; // Radius of the Earth in km
@@ -154,7 +156,21 @@ const ParkingLotCard = ({ lot, onViewDetails, onBookNow, userLocation }) => {
             View Details
           </button>
           <button
-            onClick={() => onBookNow(lot.id)}
+            onClick={() => {
+              const target = `/booking?lotId=${lot.id}`;
+              // Prefer local navigation but preserve onBookNow prop if provided
+              if (onBookNow) {
+                try { onBookNow(lot.id); return; } catch (e) {}
+              }
+              // Otherwise do internal navigation and auth redirect handling
+              const token = localStorage.getItem('token');
+              if (!token) {
+                try { sessionStorage.setItem('postLoginRedirect', target); } catch {}
+                navigate('/auth', { state: { from: target } });
+                return;
+              }
+              navigate(target);
+            }}
             disabled={lot.availableSlots === 0}
             className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-colors ${
               lot.availableSlots === 0
