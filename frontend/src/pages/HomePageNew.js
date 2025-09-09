@@ -786,7 +786,7 @@ const HomePage = () => {
                                     </span>
                                   </div>
                                   <button
-                                    onClick={() => navigate(`/booking?lotId=${lot.id}`)}
+                                    onClick={() => handleBookNow(lot.id)}
                                     disabled={lot.availableSlots === 0}
                                     className={`w-full bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : ''}`}
                                   >
@@ -843,7 +843,7 @@ const HomePage = () => {
                                 </div>
                               </div>
                               <button
-                                onClick={() => navigate(`/booking?lotId=${lot.id}`)}
+                                onClick={() => handleBookNow(lot.id)}
                                 disabled={lot.availableSlots === 0}
                                 className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
                               >
