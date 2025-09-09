@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useBookings } from '../hooks/useAPI';
+import { useBookings, useParkingLotDetails } from '../hooks/useAPI';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 
 const MyBookings = () => {
   const { isAuthenticated } = useSelector((state) => state.auth);
   const navigate = useNavigate();
   const location = useLocation();
+  // If this page is opened with ?lotId=..., auto-redirect to payment with booking defaults
+  const urlParams = new URLSearchParams(location.search);
+  const lotIdFromQuery = urlParams.get('lotId');
+  const { parkingLot: queriedLot, loading: queriedLotLoading } = useParkingLotDetails(lotIdFromQuery);
   const [filter, setFilter] = useState('all');
   
   const { bookings, loading, error, refetch } = useBookings(isAuthenticated);
@@ -47,7 +51,7 @@ const MyBookings = () => {
     bookingsWithDemo.unshift(...demoBookings);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+  if (!isAuthenticated) {
       // Show login prompt and redirect to auth page
       const shouldLogin = window.confirm(
         'You need to be logged in to view your bookings. Would you like to login now?'
@@ -62,6 +66,39 @@ const MyBookings = () => {
     }
     
   }, [isAuthenticated, navigate]);
+
+  // Auto-redirect flow when accessed with a lotId (Book from map)
+  useEffect(() => {
+    if (!lotIdFromQuery) return;
+    // Only redirect once we have fetched lot details (or if not available, redirect with minimal data)
+    if (queriedLotLoading) return;
+    // Build default start/end times (start ~5 minutes in future, end +2 hours)
+    const now = new Date();
+    const roundToMinutes = (date, minutes = 5) => {
+      const ms = 1000 * 60 * minutes;
+      return new Date(Math.ceil(date.getTime() / ms) * ms);
+    };
+    const defaultStart = roundToMinutes(new Date(now.getTime() + 5 * 60 * 1000));
+    const defaultEnd = new Date(defaultStart.getTime() + 2 * 60 * 60 * 1000);
+    const bookingDataForPayment = {
+      lotId: lotIdFromQuery,
+      lotName: queriedLot?.name || 'Selected Parking Lot',
+      address: queriedLot?.address || '',
+      startDateTime: defaultStart.toISOString(),
+      endDateTime: defaultEnd.toISOString(),
+  slotType: queriedLot?.vehicleTypes?.[0] || 'car',
+      services: [],
+      totalAmount: 0
+    };
+
+    // Navigate to payment page with bookingData and parkingLot details
+    try {
+      navigate('/payment', { state: { bookingData: bookingDataForPayment, parkingLot: queriedLot || null } });
+    } catch (e) {
+      console.error('Redirect to payment failed, falling back to location change', e);
+      window.location.href = '/payment';
+    }
+  }, [lotIdFromQuery, queriedLotLoading]);
 
   const handleCancelBooking = () => alert('Cancellation API not implemented yet');
   const handleExtendBooking = () => alert('Extension API not implemented yet');
