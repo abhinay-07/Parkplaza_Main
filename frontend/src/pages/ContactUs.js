@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import API from '../services/api';
 import { motion } from 'framer-motion';
 
 const ContactUs = () => {
@@ -17,19 +18,12 @@ const ContactUs = () => {
     setError(null);
     setSubmitted(false);
     try {
-      const res = await fetch("/api/contact", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(form),
-      });
-      if (res.ok) {
+      const res = await API.post('/contact', form);
+      if (res.status >= 200 && res.status < 300) {
         setSubmitted(true);
         setForm({ name: '', email: '', message: '' });
       } else {
-        const data = await res.json();
-        setError(data.error || "Failed to send message. Please try again.");
+        setError((res.data && (res.data.error || res.data.message)) || "Failed to send message. Please try again.");
       }
     } catch (err) {
       setError("Network error. Please try again.");

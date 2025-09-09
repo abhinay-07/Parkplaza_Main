@@ -8,7 +8,11 @@ const BookingPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const urlParams = new URLSearchParams(location.search);
-  const lotId = urlParams.get('lotId');
+  let lotId = urlParams.get('lotId');
+  // Validate lotId as MongoDB ObjectId
+  if (!lotId || !lotId.match(/^[a-fA-F0-9]{24}$/)) {
+    lotId = null;
+  }
 
   // Check authentication
   useEffect(() => {
@@ -25,7 +29,8 @@ const BookingPage = () => {
   }, [navigate, location]);
 
   // Form states
-  const [slotType, setSlotType] = useState('car');
+  // Only allow supported vehicle types
+  const [slotType, setSlotType] = useState('');
   const [startDateTime, setStartDateTime] = useState('');
   const [endDateTime, setEndDateTime] = useState('');
   const [selectedServices, setSelectedServices] = useState([]);
@@ -34,6 +39,12 @@ const BookingPage = () => {
   // Fetch data
   const { parkingLot, loading: lotLoading, error: lotError } = useParkingLotDetails(lotId);
   const { services, loading: servicesLoading } = useServices(lotId);
+  // Set default slotType to first supported type
+  useEffect(() => {
+    if (parkingLot && parkingLot.vehicleTypes && parkingLot.vehicleTypes.length > 0) {
+      setSlotType(parkingLot.vehicleTypes[0]);
+    }
+  }, [parkingLot]);
   
   // Calculate booking price
   const { priceData, loading: priceLoading, calculatePrice, resetPrice } = useBookingPrice();
@@ -58,14 +69,18 @@ const BookingPage = () => {
   // Initialize default start and end times
   useEffect(() => {
     const now = new Date();
-    const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-    
-    // Format for datetime-local input
-    const formatDateTime = (date) => {
-      return date.toISOString().slice(0, 16);
+    // Default start time to a short time in the future to avoid 'start time in the past' (round up to next 5 minutes)
+    const roundToMinutes = (date, minutes = 5) => {
+      const ms = 1000 * 60 * minutes;
+      return new Date(Math.ceil(date.getTime() / ms) * ms);
     };
+    const defaultStart = roundToMinutes(new Date(now.getTime() + 5 * 60 * 1000));
+    const twoHoursLater = new Date(defaultStart.getTime() + 2 * 60 * 60 * 1000);
 
-    setStartDateTime(formatDateTime(now));
+    // Format for datetime-local input
+    const formatDateTime = (date) => date.toISOString().slice(0, 16);
+
+    setStartDateTime(formatDateTime(defaultStart));
     setEndDateTime(formatDateTime(twoHoursLater));
   }, []);
 
@@ -88,25 +103,50 @@ const BookingPage = () => {
 
   const duration = calculateDuration();
 
-  // Handle booking submission
-  const handleBooking = () => {
+  // Handle booking submission - navigate to Payment selection page first
+  const handleBooking = async () => {
     if (!startDateTime || !endDateTime || !lotId) {
       alert('Please fill in all required fields');
       return;
     }
 
-    const bookingData = {
-      parkingLotId: lotId,
-      slotType,
+    // Ensure start is at least a couple minutes in the future to avoid backend rejections
+    const now = new Date();
+    const minStart = new Date(now.getTime() + 2 * 60 * 1000);
+    const start = new Date(startDateTime);
+    const end = new Date(endDateTime);
+    if (start < minStart) {
+      alert('Start time was too close to current time. Adjusting start time a few minutes forward.');
+      // bump start forward to minStart and push end accordingly by same delta
+      const delta = minStart.getTime() - start.getTime();
+      const newStart = minStart;
+      const newEnd = new Date(end.getTime() + delta);
+      setStartDateTime(newStart.toISOString().slice(0,16));
+      setEndDateTime(newEnd.toISOString().slice(0,16));
+      // allow the UI to update and then proceed with adjusted times
+      // small delay to ensure updated state propagates
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // Build bookingData expected by PaymentPage
+    const bookingDataForPayment = {
       startDateTime: new Date(startDateTime).toISOString(),
       endDateTime: new Date(endDateTime).toISOString(),
+      slotType,
       services: selectedServices,
-  totalAmount: (priceData?.total || priceData?.pricing?.totalAmount || 0),
-      slotCode: selectedSlot?.code || null
+      slotCode: selectedSlot?.code || undefined,
+      totalAmount: priceData?.total ?? priceData?.pricing?.totalAmount ?? 0
     };
 
-    // Navigate to payment page with booking data
-    navigate('/payment', { state: { bookingData, parkingLot } });
+    // Navigate to Payment page with booking data and parking lot details
+    try {
+      console.log('Navigating to /payment with', { bookingData: bookingDataForPayment, parkingLot });
+      navigate('/payment', { state: { bookingData: bookingDataForPayment, parkingLot } });
+    } catch (err) {
+      console.error('Navigation to payment failed:', err);
+      // Fallback: set location directly
+      window.location.href = '/payment';
+    }
   };
 
   if (!lotId) {
@@ -182,40 +222,36 @@ const BookingPage = () => {
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Select Slot Type</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {parkingLot.slotTypes?.map((slot) => (
-                  <button
-          key={slot.type}
-                    onClick={() => setSlotType(slot.type)}
-                    className={`border-2 rounded-lg p-4 text-left transition-colors ${
-                      slotType === slot.type
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                    disabled={slot.available === 0}
-                  >
-                    <div className="flex items-center mb-2">
-                      <div className="p-2 bg-gray-100 rounded-lg mr-3">
-                        {slot.type === 'car' ? (
-                          <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M4 16a2 2 0 100-4 2 2 0 000 4zM16 16a2 2 0 100-4 2 2 0 000 4z"/>
-                            <path fillRule="evenodd" d="M3 4a1 1 0 00-1 1v10a1 1 0 102 0V5a1 1 0 001-1h12a1 1 0 001 1v10a1 1 0 102 0V5a1 1 0 00-1-1H3z" clipRule="evenodd"/>
-                          </svg>
-                        ) : (
-                          <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/>
-                          </svg>
-                        )}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold capitalize">{slot.type} Parking</h3>
-                        <p className="text-sm text-gray-600">₹{slot.price}/hour</p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      {slot.available > 0 ? `${slot.available} slots available` : 'Fully booked'}
-                    </p>
-                  </button>
-                ))}
+        {parkingLot.vehicleTypes?.map((type) => (
+          <button
+            key={type}
+            onClick={() => setSlotType(type)}
+            className={`border-2 rounded-lg p-4 text-left transition-colors ${
+              slotType === type
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center mb-2">
+              <div className="p-2 bg-gray-100 rounded-lg mr-3">
+                {/* Icon logic can be improved for each type */}
+                {type === 'car' ? (
+                  <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M4 16a2 2 0 100-4 2 2 0 000 4zM16 16a2 2 0 100-4 2 2 0 000 4z"/>
+                    <path fillRule="evenodd" d="M3 4a1 1 0 00-1 1v10a1 1 0 102 0V5a1 1 0 001-1h12a1 1 0 001 1v10a1 1 0 102 0V5a1 1 0 00-1-1H3z" clipRule="evenodd"/>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                    <circle cx="10" cy="10" r="8" />
+                  </svg>
+                )}
+              </div>
+              <div>
+                <h3 className="font-semibold capitalize">{type} Parking</h3>
+              </div>
+            </div>
+          </button>
+        ))}
               </div>
               <div className="mt-6">
                 <h3 className="text-lg font-semibold text-gray-800 mb-3">Choose Specific Slot (Optional)</h3>

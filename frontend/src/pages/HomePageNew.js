@@ -786,10 +786,12 @@ const HomePage = () => {
                                     </span>
                                   </div>
                                   <button
-                                    onClick={() => handleViewDetails(lot.id)}
-                                    className="w-full bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors"
+                                    type="button"
+                                    onClick={() => handleBookNow(lot.id)}
+                                    disabled={lot.availableSlots === 0}
+                                    className={`w-full bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : ''}`}
                                   >
-                                    View Details
+                                    {lot.availableSlots === 0 ? 'Full' : 'Book Now'}
                                   </button>
                                 </div>
                               </Popup>
@@ -804,7 +806,7 @@ const HomePage = () => {
                           <h3 className="text-xl font-bold text-gray-800 mb-2">Available Parking Lots</h3>
                           <p className="text-sm text-gray-600">Click on a marker or lot below to view details</p>
                         </div>
-                        
+
                         <div className="space-y-4">
                           {filteredLots.map((lot, index) => (
                             <motion.div
@@ -812,8 +814,7 @@ const HomePage = () => {
                               initial={{ opacity: 0, x: 20 }}
                               animate={{ opacity: 1, x: 0 }}
                               transition={{ duration: 0.4, delay: index * 0.1 }}
-                              className="bg-white rounded-xl p-4 shadow-md hover:shadow-lg transition-all cursor-pointer border border-gray-200"
-                              onClick={() => handleViewDetails(lot.id)}
+                              className="bg-white rounded-xl p-4 shadow-md hover:shadow-lg transition-all border border-gray-200"
                               whileHover={{ scale: 1.02 }}
                             >
                               <div className="flex items-start justify-between mb-2">
@@ -842,11 +843,20 @@ const HomePage = () => {
                                   <span className="text-xs text-gray-600 ml-1">({lot.rating})</span>
                                 </div>
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => handleBookNow(lot.id)}
+                                disabled={lot.availableSlots === 0}
+                                className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+                              >
+                                {lot.availableSlots === 0 ? 'Full' : 'Book Now'}
+                              </button>
                             </motion.div>
                           ))}
                         </div>
-                        
+
                         <motion.button
+                          type="button"
                           onClick={() => setViewMode('list')}
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}

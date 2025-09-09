@@ -127,3 +127,23 @@ cd frontend && npm install && cp .env .env.local && npm start
 - `GET /api/services/category/:category` - Get services by category
 
 **Made with ❤️ for urban mobility**
+
+## 🛳 Deployment & Environment Notes
+
+- Frontend reads `REACT_APP_API_URL` from the frontend `.env` at build/runtime. Make sure the value includes the `/api` prefix if your code expects it (example: `REACT_APP_API_URL=https://yourdomain.com/api`). The app's axios client uses this value as the baseURL.
+- Backend optional PDF ticket generation requires additional packages. If you want server-generated PDF tickets, install the following in the `backend` folder before deploying:
+      - `pdfkit`
+      - `qrcode`
+
+         Install example (PowerShell):
+
+      ```powershell
+      cd backend
+      npm install pdfkit qrcode
+      npm install
+      npm run dev
+      ```
+
+- After changing environment variables, rebuild the frontend (if using a static host) and restart backend services so they pick up the new `.env` values.
+
+If you'd like, I can add the backend PDF dependencies and push that change to your feature branch so deployment will include server-side tickets.
