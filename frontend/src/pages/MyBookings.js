@@ -12,7 +12,6 @@ const MyBookings = () => {
   const [filter, setFilter] = useState('all');
   
   const { bookings, loading, error, refetch } = useBookings(isAuthenticated);
-  const bookingsWithDemo = bookings;
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -70,106 +69,16 @@ const MyBookings = () => {
   };
 
   const handleDownloadTicket = (booking) => {
-    // Demo bookings: fallback to JSON download
-    if (booking.id === 'demo123' || booking.id === 'demo-payment') {
-      const ticket = {
-        bookingId: booking.id,
-        parkingLot: booking.lotName,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        slotType: booking.slotType,
-        slotNumber: booking.slotNumber,
-        totalAmount: booking.totalAmount,
-        paymentStatus: booking.paymentStatus,
-        paymentId: booking.paymentId || booking.transactionId || booking.payment?.paymentId || booking.payment?.transactionId || null
-      };
-
-      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(ticket, null, 2));
-      const dlAnchor = document.createElement('a');
-      dlAnchor.setAttribute('href', dataStr);
-      dlAnchor.setAttribute('download', `ticket_${ticket.bookingId || 'unknown'}.json`);
-      document.body.appendChild(dlAnchor);
-      dlAnchor.click();
-      dlAnchor.remove();
-      return;
-    }
-
-    // For real bookings, download PDF from server
-    (async () => {
-      try {
-        const res = await bookingService.getTicket(booking.id);
-        const contentType = res.headers['content-type'];
-        if (contentType && contentType.includes('application/pdf')) {
-          const blob = new Blob([res.data], { type: 'application/pdf' });
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `ticket_${booking.id}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          window.URL.revokeObjectURL(url);
-        } else {
-          // If server returned JSON (e.g., missing PDF deps or error), render a printable HTML ticket
-          const payload = res.data;
-          const ticketObj = (typeof payload === 'string') ? (() => {
-            try { return JSON.parse(payload); } catch(e) { return { message: payload }; }
-          })() : payload;
-
-          // Build simple printable HTML
-          const html = `
-            <html>
-              <head>
-                <title>Ticket - ${booking.id}</title>
-                <style>
-                  body { font-family: Arial, sans-serif; margin: 40px; }
-                  .ticket { max-width: 700px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; }
-                  h1 { text-align: center; }
-                  .row { display:flex; justify-content:space-between; margin:8px 0; }
-                  .label { color: #555; }
-                </style>
-              </head>
-              <body>
-                <div class="ticket">
-                  <h1>ParkPlaza - Booking Ticket</h1>
-                  <div class="row"><div class="label">Booking ID</div><div>${booking.id}</div></div>
-                  <div class="row"><div class="label">Parking Lot</div><div>${booking.lotName || ''}</div></div>
-                  <div class="row"><div class="label">Slot</div><div>${booking.slotNumber || booking.slotType || '—'}</div></div>
-                  <div class="row"><div class="label">Start</div><div>${booking.startTime || ''}</div></div>
-                  <div class="row"><div class="label">End</div><div>${booking.endTime || ''}</div></div>
-                  <div class="row"><div class="label">Amount</div><div>₹${booking.totalAmount || ''}</div></div>
-                  <hr />
-                  <pre style="white-space:pre-wrap;margin-top:12px">${JSON.stringify(ticketObj, null, 2)}</pre>
-                </div>
-                <script>
-                  window.onload = function() { setTimeout(() => { window.print(); }, 250); };
-                </script>
-              </body>
-            </html>
-          `;
-
-          const w = window.open('', '_blank');
-          if (!w) {
-            // Fallback: download JSON file
-            const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(ticketObj, null, 2));
-            const dl = document.createElement('a');
-            dl.href = dataStr;
-            dl.download = `ticket_${booking.id}.json`;
-            document.body.appendChild(dl);
-            dl.click();
-            dl.remove();
-          } else {
-            w.document.write(html);
-            w.document.close();
-          }
-        }
-        // refresh bookings to pick up any updated payment/refund ids persisted by server
-        refetch?.();
-      } catch (err) {
-        console.error('Failed to download ticket PDF', err);
-        alert('Unable to download ticket. Please try again.');
-      }
-    })();
+    const qrData = {
+      bookingId: booking.id,
+      parkingLot: booking.lotName,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      slotType: booking.slotType,
+      slotNumber: booking.slotNumber
+    };
+    console.log('Download ticket:', qrData);
+    alert('Ticket download with QR would be implemented here.');
   };
 
   const getStatusColor = (status) => {
@@ -204,10 +113,10 @@ const MyBookings = () => {
     }
   };
 
-  // Use bookingsWithDemo for filtering and display
-  const filteredBookings = filter === 'all'
-    ? bookingsWithDemo
-    : bookingsWithDemo.filter(b => b.status === filter);
+  const filteredBookings = bookings.filter(booking => {
+    if (filter === 'all') return true;
+    return booking.status === filter;
+  });
 
   const formatDateTime = (dateTimeString) => {
     const date = new Date(dateTimeString);
@@ -397,9 +306,8 @@ const MyBookings = () => {
                     <div className="flex space-x-4">
                       {booking.status === 'confirmed' && (
                         <button
-                          onClick={() => handleCancelBooking(booking)}
-                          disabled={cancellingId === booking.id}
-                          className={`text-sm font-medium ${cancellingId === booking.id ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:text-red-500'}`}
+                          onClick={handleCancelBooking}
+                          className="text-sm text-red-600 hover:text-red-500 font-medium"
                         >
                           {cancellingId === booking.id ? 'Cancelling…' : 'Cancel Booking'}
                         </button>

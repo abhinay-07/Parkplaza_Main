@@ -35,37 +35,43 @@ const bookingService = {
     const res = await bookingAPI.cancel(id, reason);
     return res.data.data?.booking || res.data.data;
   },
+
+  // Cancel payment endpoint (server may implement separate route)
   cancelPayment: async (id, reason) => {
     const res = await bookingAPI.cancelPayment(id, reason);
     return res.data.data || res.data;
   },
+
+  // Download ticket helper: returns either a Blob (PDF) or a JSON-like object/string when server returns non-PDF
   getTicket: async (id) => {
-  try {
-    const res = await bookingAPI.downloadTicket(id);
-    return res; // return full axios response so caller can inspect headers/content-type
-  } catch (err) {
-    // Axios throws for non-2xx; attempt a fetch fallback so we can read the response body (JSON message) if server returned non-PDF
+    // First try axios-based API which requests arraybuffer
     try {
-  // Use axios instance baseURL (if set) to avoid duplicating or omitting the /api prefix
-  const base = (API && API.defaults && API.defaults.baseURL) || process.env.REACT_APP_API_URL || 'https://parkplaza-main.onrender.com/api';
-  const url = `${base.replace(/\/$/, '')}/booking/${id}/ticket`;
-  const resp = await fetch(url, { credentials: 'include' });
-      const contentType = resp.headers.get('content-type') || '';
-      if (contentType.includes('application/pdf') || resp.ok) {
-        // If it's ok and pdf, return arrayBuffer so caller can make blob
-        const buffer = await resp.arrayBuffer();
-        return { data: buffer, headers: { 'content-type': contentType }, status: resp.status };
+      const res = await bookingAPI.getTicket(id);
+      const buffer = res.data;
+      // If server returned arraybuffer for PDF, wrap as Blob
+      if (buffer) return { data: buffer, headers: res.headers };
+      // Fallback: return raw response
+      return res;
+    } catch (err) {
+      // Fallback to fetch so we can handle non-2xx and examine body
+      try {
+        const base = (API && API.defaults && API.defaults.baseURL) || process.env.REACT_APP_API_URL || 'https://parkplaza-main.onrender.com/api';
+        const url = `${base.replace(/\/$/, '')}/booking/${id}/ticket`;
+        const resp = await fetch(url, { credentials: 'include', headers: { Accept: 'application/pdf' } });
+        const contentType = resp.headers.get('content-type') || '';
+        if (contentType.includes('application/pdf') || resp.ok) {
+          const buffer = await resp.arrayBuffer();
+          return { data: buffer, headers: { 'content-type': contentType }, status: resp.status };
+        }
+        const text = await resp.text();
+        let parsed = null;
+        try { parsed = JSON.parse(text); } catch { parsed = text; }
+        return { data: parsed, headers: { 'content-type': contentType }, status: resp.status };
+      } catch (err2) {
+        // If all fallbacks fail, throw original error
+        throw err;
       }
-      // Not a PDF or non-OK response; try to parse JSON or text
-      const text = await resp.text();
-  let parsed = null;
-  try { parsed = JSON.parse(text); } catch { /* ignore parse error, use raw text */ parsed = text; }
-      return { data: parsed, headers: { 'content-type': contentType }, status: resp.status };
-    } catch {
-      // If even the fallback failed, rethrow original axios error
-      throw err;
     }
-  }
   },
   extend: async (id, additionalHours) => {
     const res = await bookingAPI.extend(id, additionalHours);

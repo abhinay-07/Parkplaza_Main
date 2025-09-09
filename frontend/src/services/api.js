@@ -97,7 +97,10 @@ export const bookingAPI = {
   cancel: (id, reason) => API.delete(`/booking/${id}`, { data: { reason } }),
   extend: (id, additionalHours) => API.put(`/booking/${id}/extend`, { additionalHours }),
   cancelPayment: (id, reason) => API.post(`/booking/${id}/payment/cancel`, { reason }),
-  downloadTicket: (id) => API.get(`/booking/${id}/ticket`, { responseType: 'blob' }),
+  // Ticket download (returns PDF data as arraybuffer)
+  getTicket: (id) => API.get(`/booking/${id}/ticket`, { responseType: 'arraybuffer' }),
+  // alias for backward compatibility
+  downloadTicket: (id) => API.get(`/booking/${id}/ticket`, { responseType: 'arraybuffer' }),
   // Payments
   createStripeIntent: (amount, currency = 'inr', metadata = {}) => API.post('/booking/create-payment-intent', { amount, currency, metadata }),
   createRazorpayOrder: (amount, receipt, notes = {}, currency = 'INR') => API.post('/booking/create-razorpay-order', { amount, currency, receipt, notes }),

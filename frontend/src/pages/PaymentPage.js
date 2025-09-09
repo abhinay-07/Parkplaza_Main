@@ -1,12 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import bookingService from '../services/bookingService';
+import { useParkingLotDetails } from '../hooks/useAPI';
 
 const PaymentPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { bookingData, parkingLot } = location.state || {};
+  const { bookingData: initialBookingData, parkingLot: initialParkingLot } = location.state || {};
+  const [bookingData, setBookingData] = useState(initialBookingData || null);
+  const [parkingLot, setParkingLot] = useState(initialParkingLot || null);
+
+  const lotId = bookingData?.lotId || (initialParkingLot && (initialParkingLot.id || initialParkingLot._id));
+  const { parkingLot: fetchedLot, loading: fetchedLotLoading } = useParkingLotDetails(lotId);
+
+  useEffect(() => {
+    if (!parkingLot && fetchedLot && !fetchedLotLoading) {
+      setParkingLot(fetchedLot);
+    }
+  }, [parkingLot, fetchedLot, fetchedLotLoading]);
+
+  // slotType can be a string (e.g. 'car') or an object ({ type, available, total, price })
+  const slotTypeToString = (slot) => {
+    if (!slot) return 'car';
+    if (typeof slot === 'string') return slot;
+    return slot.type || slot.name || 'car';
+  };
 
   const [paymentMethod, setPaymentMethod] = useState('credit-card');
   const [paymentLoading, setPaymentLoading] = useState(false);
@@ -24,7 +43,7 @@ const PaymentPage = () => {
     walletProvider: 'paytm'
   });
 
-  if (!bookingData || !parkingLot) {
+  if (!bookingData) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-4xl mx-auto px-4 py-8">
@@ -41,6 +60,11 @@ const PaymentPage = () => {
         </div>
       </div>
     );
+  }
+
+  // If parking lot is still loading, show spinner
+  if (!parkingLot && fetchedLotLoading) {
+    return <LoadingSpinner />;
   }
 
   const handleInputChange = (e) => {
@@ -71,13 +95,14 @@ const PaymentPage = () => {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Prepare the booking data to confirm before creating backend booking
+      const effectiveLot = parkingLot || fetchedLot || {};
       const stubBookingData = {
-        lotId: parkingLot.id,
-        lotName: parkingLot.name,
-        address: parkingLot.address,
+        lotId: effectiveLot.id || effectiveLot._id || bookingData.lotId,
+        lotName: effectiveLot.name || bookingData.lotName,
+        address: effectiveLot.address || bookingData.address,
         startTime: bookingData.startDateTime,
         endTime: bookingData.endDateTime,
-        slotType: bookingData.slotType,
+        slotType: slotTypeToString(bookingData.slotType),
         services: bookingData.services || [],
         totalAmount: bookingData.totalAmount,
         paymentMethod: paymentMethod,
@@ -116,7 +141,7 @@ const PaymentPage = () => {
       const payload = {
         parkingLot: finalBookingData.lotId,
         vehicle: {
-          type: bookingData.slotType || 'car',
+          type: slotTypeToString(finalBookingData.slotType) || slotTypeToString(bookingData.slotType) || 'car',
           licensePlate: licensePlate.trim().toUpperCase()
         },
         bookingDetails: {
@@ -137,7 +162,7 @@ const PaymentPage = () => {
         lotName: finalBookingData.lotName || 'Demo Payment Lot',
         lotId: finalBookingData.lotId,
         address: finalBookingData.address,
-        slotType: bookingData.slotType || 'car',
+        slotType: slotTypeToString(bookingData.slotType) || 'car',
         slotNumber: bookingData.slotCode || 'A1',
         startTime: finalBookingData.startTime,
         endTime: finalBookingData.endTime,
