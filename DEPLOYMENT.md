@@ -376,3 +376,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 Built with ❤️ using the MERN stack
+
+_Deployment notes updated: confirm backend PDF deps and frontend REACT_APP_API_URL before production deploy._
