@@ -786,8 +786,7 @@ const HomePage = () => {
                                     </span>
                                   </div>
                                   <button
-                                    type="button"
-                                    onClick={() => handleBookNow(lot.id)}
+                                    onClick={() => navigate(`/booking?lotId=${lot.id}`)}
                                     disabled={lot.availableSlots === 0}
                                     className={`w-full bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : ''}`}
                                   >
@@ -806,7 +805,7 @@ const HomePage = () => {
                           <h3 className="text-xl font-bold text-gray-800 mb-2">Available Parking Lots</h3>
                           <p className="text-sm text-gray-600">Click on a marker or lot below to view details</p>
                         </div>
-
+                        
                         <div className="space-y-4">
                           {filteredLots.map((lot, index) => (
                             <motion.div
@@ -844,8 +843,7 @@ const HomePage = () => {
                                 </div>
                               </div>
                               <button
-                                type="button"
-                                onClick={() => handleBookNow(lot.id)}
+                                onClick={() => navigate(`/booking?lotId=${lot.id}`)}
                                 disabled={lot.availableSlots === 0}
                                 className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-colors ${lot.availableSlots === 0 ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
                               >
@@ -854,9 +852,8 @@ const HomePage = () => {
                             </motion.div>
                           ))}
                         </div>
-
+                        
                         <motion.button
-                          type="button"
                           onClick={() => setViewMode('list')}
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}

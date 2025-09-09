@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import API from '../services/api';
 import { motion } from 'framer-motion';
 
 const ContactUs = () => {
@@ -12,18 +11,27 @@ const ContactUs = () => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  // Use a hardcoded backend URL for contact API only
+  const CONTACT_API_URL = "https://parkplaza-main.onrender.com/api/contact";
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setSubmitted(false);
     try {
-      const res = await API.post('/contact', form);
-      if (res.status >= 200 && res.status < 300) {
+      const res = await fetch(CONTACT_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) {
         setSubmitted(true);
         setForm({ name: '', email: '', message: '' });
       } else {
-        setError((res.data && (res.data.error || res.data.message)) || "Failed to send message. Please try again.");
+        const data = await res.json();
+        setError(data.error || "Failed to send message. Please try again.");
       }
     } catch (err) {
       setError("Network error. Please try again.");
