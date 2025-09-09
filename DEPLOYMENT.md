@@ -167,18 +167,14 @@ npm start
 2. Configure production environment variables in `.env.production`
 3. Use production API keys (Stripe Live, Razorpay Live)
 4. Deploy to platforms like:
-   - **Heroku**: `git push heroku main`
-   - **Railway**: Connect GitHub repository
-   - **DigitalOcean App Platform**
-   - **AWS EC2/Elastic Beanstalk**
+   - **Rendar**: Connect GitHub repository
 
 #### Frontend Production
 1. Update API URLs in `.env.production`
 2. Build the application: `npm run build`
 3. Deploy to platforms like:
    - **Vercel**: `vercel --prod`
-   - **Netlify**: Connect GitHub repository
-   - **AWS S3 + CloudFront**
+
 
 ### Environment Variables for Production
 
