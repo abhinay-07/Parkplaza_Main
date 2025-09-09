@@ -161,6 +161,9 @@ export const useParkingLotDetails = (lotId) => {
       lng: coords?.[0],
       availableSlots: lot.capacity?.available ?? lot.availableSlots ?? 0,
       totalSlots: lot.capacity?.total ?? lot.totalSlots ?? 0,
+  capacity: lot.capacity || { total: lot.totalSlots || 0, available: lot.capacity?.available ?? lot.availableSlots ?? 0 },
+  vehicleTypes: lot.vehicleTypes || (lot.slotTypes || []),
+  slots: Array.isArray(lot.slots) ? lot.slots : [],
       pricePerHour: {
         day: lot.pricing?.hourly ?? lot.pricePerHour?.day ?? 0,
         night: lot.pricing?.hourly ?? lot.pricePerHour?.night ?? lot.pricing?.hourly ?? 0

@@ -4,7 +4,10 @@ import axios from 'axios';
 const API = axios.create({
   baseURL: process.env.REACT_APP_API_URL || 'https://parkplaza-main.onrender.com/api',
   timeout: 15000,
+  withCredentials: true,
 });
+
+console.log('[api] Resolved baseURL:', process.env.REACT_APP_API_URL || 'https://parkplaza-main.onrender.com/api');
 
 // Request interceptor to add auth token
 API.interceptors.request.use(
@@ -25,14 +28,9 @@ API.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid: remove token and navigate to auth while preserving current path
+      // Token expired or invalid: remove token and redirect to home
       try { localStorage.removeItem('token'); } catch {}
-      const currentPath = window.location.pathname + window.location.search + window.location.hash;
-      let redirectUrl = '/auth';
-      if (currentPath && currentPath !== '/') {
-        redirectUrl += `?from=${encodeURIComponent(currentPath)}`;
-      }
-      window.location.href = redirectUrl;
+      window.location.href = '/';
     }
     return Promise.reject(error instanceof Error ? error : new Error(error?.message || 'Response error'));
   }
@@ -98,6 +96,8 @@ export const bookingAPI = {
   updateStatus: (id, status, reason) => API.put(`/booking/${id}/status`, { status, reason }),
   cancel: (id, reason) => API.delete(`/booking/${id}`, { data: { reason } }),
   extend: (id, additionalHours) => API.put(`/booking/${id}/extend`, { additionalHours }),
+  cancelPayment: (id, reason) => API.post(`/booking/${id}/payment/cancel`, { reason }),
+  downloadTicket: (id) => API.get(`/booking/${id}/ticket`, { responseType: 'blob' }),
   // Payments
   createStripeIntent: (amount, currency = 'inr', metadata = {}) => API.post('/booking/create-payment-intent', { amount, currency, metadata }),
   createRazorpayOrder: (amount, receipt, notes = {}, currency = 'INR') => API.post('/booking/create-razorpay-order', { amount, currency, receipt, notes }),

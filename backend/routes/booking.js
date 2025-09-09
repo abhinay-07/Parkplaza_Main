@@ -11,6 +11,40 @@ const { createOrder, verifyPaymentSignature } = require('../services/razorpaySer
 
 const router = express.Router();
 
+let Stripe, Razorpay, PDFDocument, QRCode;
+let stripeClient = null;
+let razorpayClient = null;
+let optionalPdfAvailable = false;
+
+try {
+  Stripe = require('stripe');
+} catch (e) {
+  Stripe = null;
+}
+try {
+  Razorpay = require('razorpay');
+} catch (e) {
+  Razorpay = null;
+}
+try {
+  PDFDocument = require('pdfkit');
+  QRCode = require('qrcode');
+  optionalPdfAvailable = true;
+} catch (e) {
+  // PDF/QRCode optional; if missing, ticket endpoint will return an explanatory error
+  optionalPdfAvailable = false;
+  PDFDocument = null;
+  QRCode = null;
+}
+
+// Initialize gateways if keys provided and packages are available
+if (Stripe && process.env.STRIPE_SECRET_KEY) {
+  try { stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY); } catch (e) { stripeClient = null; }
+}
+if (Razorpay && process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+  try { razorpayClient = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET }); } catch (e) { razorpayClient = null; }
+}
+
 // @desc    Calculate booking price (estimation)
 // @route   POST /api/booking/calculate-price
 // @access  Private
@@ -313,7 +347,17 @@ router.post('/new', protect, [
     const paymentStatus = devAutoPay ? 'completed' : 'pending';
     const bookingStatus = devAutoPay ? 'confirmed' : 'pending';
 
-    // Create booking
+    // Create booking - persist important payment identifiers when provided
+    const paymentData = {
+      method: payment.method,
+      status: paymentStatus,
+      paidAt: devAutoPay ? new Date() : undefined
+    };
+    if (payment.transactionId) paymentData.transactionId = payment.transactionId;
+    if (payment.paymentId) paymentData.paymentId = payment.paymentId;
+    if (payment.orderId) paymentData.orderId = payment.orderId;
+    if (payment.fees) paymentData.fees = payment.fees;
+
     const booking = await Booking.create({
       user: req.user.id,
       parkingLot: parkingLotId,
@@ -332,11 +376,7 @@ router.post('/new', protect, [
         totalAmount
       },
       services: serviceDetails,
-      payment: {
-        ...payment,
-        status: paymentStatus,
-        paidAt: devAutoPay ? new Date() : undefined
-      },
+      payment: paymentData,
       status: bookingStatus
     });
 
@@ -410,7 +450,9 @@ router.get('/my', protect, async (req, res) => {
       endTime: b.bookingDetails?.endTime,
       createdAt: b.createdAt,
       status: b.status,
-      paymentStatus: b.payment?.status || 'pending',
+  paymentStatus: b.payment?.status || 'pending',
+  paymentId: b.payment?.paymentId || b.payment?.transactionId || null,
+  transactionId: b.payment?.transactionId || null,
       totalAmount: b.pricing?.totalAmount || 0,
       qrCode: b.qrCode?.data || '',
       services: (b.services || []).map(s => s.name || s.serviceId?.toString())
@@ -775,6 +817,167 @@ router.put('/:id/extend', protect, [
       success: false,
       message: 'Server error extending booking'
     });
+  }
+});
+
+// @desc    Cancel payment / issue refund for a booking
+// @route   POST /api/booking/:id/payment/cancel
+// @access  Private
+router.post('/:id/payment/cancel', protect, [
+  body('reason').optional().isLength({ max: 500 }).withMessage('Reason too long')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation failed', errors: errors.array() });
+    }
+
+    const booking = await Booking.findById(req.params.id).populate('parkingLot');
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Authorization: allow booking owner, lot owner or admin
+    const isOwner = booking.user.toString() === req.user.id;
+  const isLotOwner = booking.parkingLot?.owner?.toString() === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isLotOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Not authorized to cancel payment for this booking' });
+    }
+
+    // Check payment state
+    if (!booking.payment || ['refunded', 'failed', 'pending'].includes(booking.payment.status)) {
+      return res.status(400).json({ success: false, message: 'Payment cannot be cancelled in its current state' });
+    }
+
+    // Compute refund amount using existing method if available
+    let refundAmount = 0;
+    try {
+      refundAmount = (typeof booking.calculateRefund === 'function') ? (booking.calculateRefund() || 0) : 0;
+    } catch (err) {
+      console.error('Error calculating refund amount:', err);
+      refundAmount = 0;
+    }
+
+    // Attempt gateway refund when applicable
+    let refundTxn = null;
+    try {
+      if (booking.payment?.method === 'stripe' && stripeClient && booking.payment.paymentId) {
+        const piId = booking.payment.paymentId;
+        const refund = await stripeClient.refunds.create({ payment_intent: piId, amount: Math.round((refundAmount || 0) * 100) });
+        refundTxn = { gateway: 'stripe', id: refund.id, raw: refund };
+      } else if (booking.payment?.method === 'razorpay' && razorpayClient && booking.payment.paymentId) {
+        const rPaymentId = booking.payment.paymentId;
+        const refund = await razorpayClient.payments.refund(rPaymentId, { amount: Math.round((refundAmount || 0) * 100) });
+        refundTxn = { gateway: 'razorpay', id: refund.id || refund, raw: refund };
+      } else {
+        // No gateway configured or unsupported method — skip external refund
+        if (booking.payment?.method && !stripeClient && booking.payment.method === 'stripe') {
+          logger.warn('Stripe key not configured; skipping gateway refund');
+        }
+        if (booking.payment?.method && !razorpayClient && booking.payment.method === 'razorpay') {
+          logger.warn('Razorpay keys not configured; skipping gateway refund');
+        }
+      }
+    } catch (gwErr) {
+      console.error('Gateway refund error:', gwErr);
+      refundTxn = { gatewayError: gwErr?.message || String(gwErr) };
+    }
+
+    // Mark payment refunded and optionally cancel booking
+    booking.payment.status = 'refunded';
+    booking.payment.refundAmount = refundAmount;
+    booking.payment.refundedAt = new Date();
+    if (refundTxn) booking.payment.refundTransactionId = refundTxn.id || null;
+    if (refundTxn) booking.payment.refundGateway = refundTxn.gateway || null;
+
+    // Mark cancellation details on booking
+    booking.status = 'cancelled';
+    booking.cancellation = {
+      reason: req.body.reason || 'Payment cancelled/refunded',
+      cancelledAt: new Date(),
+      cancelledBy: req.user.id,
+      refundEligible: refundAmount > 0,
+      refundAmount
+    };
+
+    await booking.save();
+
+    // Release the spot in the parking lot if reserved
+    if (booking.parkingLot?._id) {
+      await ParkingLot.findByIdAndUpdate(booking.parkingLot._id, {
+        $inc: { 'capacity.available': 1, 'capacity.reserved': -1 },
+        'liveStatus.lastUpdated': new Date()
+      });
+    }
+
+    // Emit real-time update
+    req.io.to(`booking-${booking._id}`).emit('payment-refunded', {
+      bookingId: booking._id,
+      refundAmount,
+      timestamp: new Date()
+    });
+
+    return res.status(200).json({ success: true, message: 'Payment refunded and booking cancelled', data: { booking, refundAmount, refundTxn } });
+  } catch (error) {
+    console.error('Cancel payment error:', error);
+    res.status(500).json({ success: false, message: 'Server error cancelling payment' });
+  }
+});
+
+// @desc    Download ticket as PDF with QR code
+// @route   GET /api/booking/:id/ticket
+// @access  Private
+router.get('/:id/ticket', protect, async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id).populate('parkingLot').populate('user');
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+    // Authorization: owner, lot owner or admin
+    const isOwner = booking.user._id.toString() === req.user.id;
+    const isLotOwner = booking.parkingLot?.owner?.toString() === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isLotOwner && !isAdmin) return res.status(403).json({ success: false, message: 'Not authorized to download this ticket' });
+
+    // Create a PDF and stream it
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="ticket_${booking._id}.pdf"`);
+
+    if (!optionalPdfAvailable) {
+      return res.status(501).json({ success: false, message: 'PDF generation dependencies not installed on server' });
+    }
+
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(20).text('ParkPlaza - Booking Ticket', { align: 'center' });
+    doc.moveDown();
+
+    doc.fontSize(12).text(`Booking ID: ${booking._id}`);
+    doc.text(`Name: ${booking.user?.name || 'N/A'}`);
+    doc.text(`Parking Lot: ${booking.parkingLot?.name || 'N/A'}`);
+    doc.text(`Address: ${booking.parkingLot?.location?.address?.city || ''}`);
+    doc.text(`Slot: ${booking.bookingDetails?.spotNumber || '—'}`);
+    doc.text(`Start: ${booking.bookingDetails?.startTime}`);
+    doc.text(`End: ${booking.bookingDetails?.endTime}`);
+    doc.text(`Amount Paid: ${booking.pricing?.totalAmount || 0}`);
+    doc.moveDown();
+
+    // Generate QR code as data URL and embed
+  const qrPayload = JSON.stringify({ bookingId: booking._id, lotId: booking.parkingLot?._id });
+  const qrDataUrl = await QRCode.toDataURL(qrPayload);
+    const base64 = qrDataUrl.replace(/^data:image\/png;base64,/, '');
+    const qrBuffer = Buffer.from(base64, 'base64');
+    doc.image(qrBuffer, { fit: [150, 150], align: 'center' });
+
+    doc.moveDown();
+    doc.fontSize(10).text('Show this ticket at the parking entrance. QR code contains booking reference.', { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error('Ticket PDF generation error:', err);
+    res.status(500).json({ success: false, message: 'Error generating ticket' });
   }
 });
 
