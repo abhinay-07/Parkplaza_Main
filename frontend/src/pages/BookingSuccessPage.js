@@ -33,18 +33,26 @@ const BookingSuccessPage = () => {
   const endTime = formatDateTime(bookingData.endDateTime);
   const duration = Math.ceil((new Date(bookingData.endDateTime) - new Date(bookingData.startDateTime)) / (1000 * 60 * 60));
 
-  const handleDownloadTicket = () => {
-    // Generate QR code data
-    const qrData = {
-      bookingId,
-      parkingLot: parkingLot.name,
-      startTime: bookingData.startDateTime,
-      endTime: bookingData.endDateTime,
-      slotType: bookingData.slotType
-    };
-    
-    console.log('Download ticket:', qrData);
-    alert('Ticket download functionality would be implemented here with QR code generation.');
+  const downloadBlob = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadTicket = async () => {
+    if (!bookingId || !bookingId) return alert('No booking available to download ticket');
+    try {
+      const blob = await bookingService.getTicket(bookingId);
+      downloadBlob(blob, `booking-${bookingId}-ticket.pdf`);
+    } catch (err) {
+      console.error('Download ticket failed', err);
+      alert('Failed to download ticket: ' + (err.message || err));
+    }
   };
 
   const handleViewBookings = () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 // Shared normalizer for service objects (UI shape)
 const normalizeServiceShared = (svc) => {
@@ -327,7 +327,22 @@ export const useBookings = (isAuthenticated = false) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchBookings = async () => {
+  // Stable fetchBookings so callers can safely use it in effects without
+  // causing repeated network calls. This prevents rapid re-invocation that
+  // can trigger backend rate limits (429).
+  // Prevent multiple rapid calls: in-flight guard + short throttle window.
+  const inFlightRef = useRef(false);
+  const lastFetchRef = useRef(0);
+
+  const fetchBookings = useCallback(async () => {
+    const now = Date.now();
+    // Throttle to at most once per 1.5 seconds
+    if (now - lastFetchRef.current < 1500) {
+      // skip duplicate fetch
+      return;
+    }
+    if (inFlightRef.current) return; // already fetching
+
     const token = localStorage.getItem('token');
     if (!token) {
       setError('Please login to view your bookings');
@@ -335,6 +350,9 @@ export const useBookings = (isAuthenticated = false) => {
       setLoading(false);
       return;
     }
+
+    inFlightRef.current = true;
+    lastFetchRef.current = now;
     try {
       setLoading(true);
       setError(null);
@@ -342,7 +360,7 @@ export const useBookings = (isAuthenticated = false) => {
         const response = await mockAPI.getUserBookings();
         setBookings(response.data.data || response.data || []);
       } else {
-  const response = await bookingAPI.myBookings(); // corrected method name
+        const response = await bookingAPI.myBookings();
         const data = response.data?.data || response.data || [];
         setBookings(Array.isArray(data) ? data : []);
       }
@@ -351,9 +369,10 @@ export const useBookings = (isAuthenticated = false) => {
       setError('Failed to load bookings. Please try again.');
       setBookings([]);
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -362,8 +381,9 @@ export const useBookings = (isAuthenticated = false) => {
       setLoading(false);
       return;
     }
+    // Call the stable fetchBookings once on mount/auth change.
     fetchBookings();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchBookings]);
 
   const createBooking = async (bookingData) => {
     try {
