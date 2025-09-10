@@ -138,15 +138,44 @@ const PaymentPage = () => {
     setConfirming(true);
     try {
       // Map UI data to backend payload
+      // Normalize and validate vehicle type against parking lot supported types (client-side check)
+      const chosenType = (slotTypeToString(finalBookingData.slotType) || slotTypeToString(bookingData.slotType) || 'car').toLowerCase();
+      const supportedTypes = (parkingLot && parkingLot.vehicleTypes) || (fetchedLot && fetchedLot.vehicleTypes) || [];
+      if (supportedTypes && supportedTypes.length > 0 && !supportedTypes.map(t => String(t).toLowerCase()).includes(chosenType)) {
+        setConfirmError(`Selected vehicle type "${chosenType}" is not supported at this location.`);
+        setConfirming(false);
+        return;
+      }
+
+      // Validate and normalize booking times client-side to avoid backend 400s
+      const s = new Date(finalBookingData.startTime);
+      const e = new Date(finalBookingData.endTime);
+      const now = new Date();
+      if (isNaN(s.getTime()) || isNaN(e.getTime())) {
+        setConfirmError('Invalid start or end time');
+        setConfirming(false);
+        return;
+      }
+      if (s < now) {
+        setConfirmError('Start time cannot be in the past');
+        setConfirming(false);
+        return;
+      }
+      if (e <= s) {
+        setConfirmError('End time must be after start time');
+        setConfirming(false);
+        return;
+      }
+
       const payload = {
         parkingLot: finalBookingData.lotId,
         vehicle: {
-          type: slotTypeToString(finalBookingData.slotType) || slotTypeToString(bookingData.slotType) || 'car',
+          type: chosenType,
           licensePlate: licensePlate.trim().toUpperCase()
         },
         bookingDetails: {
-          startTime: finalBookingData.startTime,
-          endTime: finalBookingData.endTime,
+          startTime: s.toISOString(),
+          endTime: e.toISOString(),
           spotNumber: bookingData.slotCode || undefined
         },
         services: finalBookingData.services || [],

@@ -68,17 +68,40 @@ const MyBookings = () => {
     }
   };
 
-  const handleDownloadTicket = (booking) => {
-    const qrData = {
-      bookingId: booking.id,
-      parkingLot: booking.lotName,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      slotType: booking.slotType,
-      slotNumber: booking.slotNumber
-    };
-    console.log('Download ticket:', qrData);
-    alert('Ticket download with QR would be implemented here.');
+  const handleDownloadTicket = async (booking) => {
+    try {
+      const res = await bookingService.getTicket(booking.id);
+      // bookingService.getTicket returns { data: ArrayBuffer, headers } for PDF or { data } fallback
+      if (res && (res.headers && (res.headers['content-type'] || res.headers['Content-Type'])?.includes('application/pdf'))) {
+        const arrayBuffer = res.data instanceof ArrayBuffer ? res.data : res.data.buffer || res.data;
+        const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ticket_${booking.id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        return;
+      }
+
+      // Fallback: generate a simple HTML ticket with embedded QR (using Google Charts API)
+      const ticketHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Ticket ${booking.id}</title></head><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;"><h2>ParkPlaza Ticket</h2><p><strong>Booking ID:</strong> ${booking.id}</p><p><strong>Parking Lot:</strong> ${booking.lotName}</p><p><strong>Slot:</strong> ${booking.slotType} - ${booking.slotNumber}</p><p><strong>Start:</strong> ${new Date(booking.startTime).toLocaleString()}</p><p><strong>End:</strong> ${new Date(booking.endTime).toLocaleString()}</p><p><strong>Total:</strong> ₹${booking.totalAmount}</p><div style="margin-top:18px;"><img src="https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(JSON.stringify({bookingId:booking.id,lot:booking.lotName,start:booking.startTime,end:booking.endTime}))}&chld=L|1" alt="QR"/></div><p style="margin-top:12px;font-size:12px;color:#666;">Present this ticket at entry. QR contains booking details.</p></body></html>`;
+
+      const blob = new Blob([ticketHtml], { type: 'text/html' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ticket_${booking.id}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Ticket download error:', err);
+      alert(err?.message || 'Failed to download ticket.');
+    }
   };
 
   const getStatusColor = (status) => {
@@ -306,7 +329,7 @@ const MyBookings = () => {
                     <div className="flex space-x-4">
                       {booking.status === 'confirmed' && (
                         <button
-                          onClick={handleCancelBooking}
+                          onClick={() => handleCancelBooking(booking)}
                           className="text-sm text-red-600 hover:text-red-500 font-medium"
                         >
                           {cancellingId === booking.id ? 'Cancelling…' : 'Cancel Booking'}
